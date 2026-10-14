@@ -787,7 +787,8 @@ const PRESETS = [
   ['openrouter', 'OpenRouter (hundreds of models)', 'https://openrouter.ai/api/v1', 'meta-llama/llama-3.3-70b-instruct'],
   ['together', 'Together AI', 'https://api.together.xyz/v1', 'meta-llama/Llama-3.3-70B-Instruct-Turbo'],
   ['deepseek', 'DeepSeek', 'https://api.deepseek.com/v1', 'deepseek-chat'],
-  ['openai', 'OpenAI', 'https://api.openai.com/v1', 'gpt-4o-mini'],\n  ['anthropic', 'Anthropic Claude', 'https://api.anthropic.com/v1', 'claude-sonnet-5-5'],
+  ['openai', 'OpenAI', 'https://api.openai.com/v1', 'gpt-4o-mini'],
+  ['anthropic', 'Anthropic Claude', 'https://api.anthropic.com/v1', 'claude-sonnet-5-5'],
   ['custom', 'Other OpenAI-compatible API', '', ''],
 ];
 const OR_BASE = 'https://openrouter.ai/api/v1';
