@@ -159,7 +159,7 @@ app.post('/api/settings', auth, (req, res) => {
     persona: String(b.persona ?? current.persona ?? '').slice(0, 2000),
     auto_reply: autoReply,
     reply_groups: replyGroups,
-    enabled: b.enabled === false ? 0 : 1,
+    enabled: b.enabled === undefined ? current.enabled : (b.enabled ? 1 : 0),
     options: JSON.stringify(options),
   });
   if (current.options.context_enabled && !options.context_enabled) q.clearObserved.run(id);
@@ -204,7 +204,7 @@ app.get('/api/email/inbox/:id', auth, (req, res) => {
   if (!m) return res.status(404).json({ error: 'Message not found' });
   res.json({ message: m });
 });
-app.post('/api/email/send', auth, async (req, res) => {
+app.post('/api/email/send', auth, slowDown, async (req, res) => {
   try {
     const id = sessionFor(req).id;
     res.json(await mail.send({ sessionId: id, to: req.body?.to,
