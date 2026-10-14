@@ -9,9 +9,21 @@ const { q, getSettings, cleanOptions } = require('./db');
 const { hasApprovedNumbers } = require('./security');
 const ai = require('./ai');
 const wa = require('./wa');
+const mail = require('./mail');
 
 const app = express();
 app.disable('x-powered-by');
+// Signed inbound relay: validate the original JSON bytes before parsing.
+app.post('/api/webhooks/inbound-email', express.raw({ type: 'application/json', limit: '65kb' }), (req, res) => {
+  if (!Buffer.isBuffer(req.body) ||
+      !mail.verifyInbound(req.body, req.get('x-air-timestamp'), req.get('x-air-signature')))
+    return res.status(403).json({ error: 'Invalid webhook signature' });
+  let payload;
+  try { payload = JSON.parse(req.body.toString('utf8')); }
+  catch (_) { return res.status(400).json({ error: 'Invalid email payload' }); }
+  mail.ingest(payload);
+  return res.status(202).json({ accepted: true });
+});
 app.use(express.json({ limit: '100kb' }));
 app.use(cookieParser());
 app.use((req, res, next) => {
@@ -136,6 +148,9 @@ app.post('/api/settings', auth, (req, res) => {
   const options = { ...current.options, ...cleanOptions(b.options) };
   const autoReply = (b.auto_reply ?? current.auto_reply) ? 1 : 0;
   const replyGroups = (b.reply_groups ?? current.reply_groups) ? 1 : 0;
+  if (options.control_enabled && !hasApprovedNumbers(options.control_numbers)) {
+    return res.status(400).json({ error: 'Add an approved controller phone number before enabling commands.' });
+  }
   if (id !== 'house' && (autoReply || replyGroups) && !hasApprovedNumbers(options.allow_list)) {
     return res.status(400).json({ error: 'Personal WhatsApp incoming replies require an approved international phone number.' });
   }
@@ -144,10 +159,57 @@ app.post('/api/settings', auth, (req, res) => {
     persona: String(b.persona ?? current.persona ?? '').slice(0, 2000),
     auto_reply: autoReply,
     reply_groups: replyGroups,
-    enabled: b.enabled === false ? 0 : 1,
+    enabled: b.enabled === undefined ? current.enabled : (b.enabled ? 1 : 0),
     options: JSON.stringify(options),
   });
+  if (current.options.context_enabled && !options.context_enabled) q.clearObserved.run(id);
   res.json(getSettings(id));
+});
+
+// ---------- reply-once & opt-in context ----------
+app.get('/api/reply-state', auth, (req, res) => {
+  res.json({ answeredChats: q.receiptCount.get(sessionFor(req).id).c });
+});
+app.post('/api/reply-state/reset', auth, (req, res) => {
+  q.clearReceipts.run(sessionFor(req).id);
+  res.json({ ok: true, answeredChats: 0 });
+});
+
+// ---------- authorized controller ----------
+app.get('/api/controller/status', auth, (req, res) => {
+  const id = sessionFor(req).id;
+  res.json({ hasPin: !!q.getControllerPin.get(id), recent: q.listControllerAudit.all(id) });
+});
+app.post('/api/controller/pin', auth, (req, res) => {
+  const pin = String(req.body?.pin || '');
+  if (!/^(?=.*[a-zA-Z])(?=.*[0-9])[A-Za-z0-9!@#$%*_-]{10,64}$/.test(pin))
+    return res.status(400).json({ error: 'Use a 10–64 character PIN with letters and numbers (no spaces).' });
+  q.setControllerPin.run(sessionFor(req).id, bcrypt.hashSync(pin, 12));
+  res.json({ ok: true });
+});
+
+// ---------- optional bot email ----------
+app.get('/api/email/status', auth, (req, res) => {
+  res.json({ ...mail.readiness(), address: mail.mailbox(sessionFor(req).id) });
+});
+app.post('/api/email/provision', auth, (req, res) => {
+  try { res.json({ address: mail.provision(sessionFor(req).id) }); }
+  catch (err) { res.status(409).json({ error: err.message }); }
+});
+app.get('/api/email/inbox', auth, (req, res) => {
+  res.json({ messages: q.listBotEmails.all(sessionFor(req).id) });
+});
+app.get('/api/email/inbox/:id', auth, (req, res) => {
+  const m = q.getBotEmail.get(sessionFor(req).id, Number(req.params.id));
+  if (!m) return res.status(404).json({ error: 'Message not found' });
+  res.json({ message: m });
+});
+app.post('/api/email/send', auth, slowDown, async (req, res) => {
+  try {
+    const id = sessionFor(req).id;
+    res.json(await mail.send({ sessionId: id, to: req.body?.to,
+      subject: req.body?.subject, text: req.body?.text }));
+  } catch (err) { res.status(422).json({ error: err.message }); }
 });
 
 // ---------- try the AI in the browser ----------
@@ -212,6 +274,10 @@ if (config.retentionDays > 0) {
   setInterval(() => {
     q.prune.run(config.retentionDays * 86400);
     q.pruneReplyAudits.run(config.retentionDays * 86400);
+    q.pruneObserved.run(config.retentionDays * 86400);
+    q.pruneControllerAudit.run(config.retentionDays * 86400);
+    q.pruneProcessedControllers.run(config.retentionDays * 86400);
+    q.pruneBotEmails.run(config.retentionDays * 86400);
   }, 6 * 3600_000).unref();
 }
 

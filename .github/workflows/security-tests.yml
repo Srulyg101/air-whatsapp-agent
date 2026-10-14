@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - security/whatsapp-hardening
+      - 'feature/**'
   pull_request:
     branches:
       - main

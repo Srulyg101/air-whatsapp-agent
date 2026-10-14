@@ -1,4 +1,8 @@
-# Air Agent — everyone's AI on WhatsApp
+# Air Agent — WhatsApp + AI
+
+**Scan any WhatsApp number. Done.** Link a WhatsApp number you control, configure who the AI can answer, and run your own private open-source model. The refreshed UI includes connection onboarding, reply controls, a Command Center, an optional bot inbox, and monitoring.
+
+**New feature branch:** [Air Agent 2 Hostinger release guide](docs/DEPLOY_HOSTINGER.md). The production `main` branch and the existing Hostinger VPS must be deployed separately.
 
 Sign up, scan a QR code, and your WhatsApp has an AI agent. No API keys, no paid AI: everything runs on your own server with open-source models.
 
@@ -37,7 +41,7 @@ git clone https://github.com/Srulyg101/air-whatsapp-agent.git air-agent && cd ai
 sudo bash install.sh
 ```
 
-The installer frees disk space, installs Docker, adds swap on small servers, chooses a model that fits your RAM, and starts everything. In the security branch the dashboards are loopback-only; see **Security-first setup** below before attempting to log in.
+The installer frees disk space, installs Docker, adds swap on small servers, chooses a model that fits your RAM, and starts everything. The hardened dashboards are loopback-only; configure private access and HTTPS per [the release guide](docs/DEPLOY_HOSTINGER.md).
 
 ## Day-to-day
 
@@ -86,3 +90,13 @@ This uses WhatsApp's linked-device (WhatsApp Web) protocol through an unofficial
 2. Set `OPEN_SIGNUP=false` and `COOKIE_SECURE=true` in the **actual** Hostinger environment (explicit old values override code defaults).
 3. Back up `agent-data` securely. Review any existing dashboard users and WhatsApp Linked Devices.
 4. Run `npm test`, verify the settings API blocks enabling personal auto-replies without an allow list, test the audit and emergency switch using disposable numbers, then approve merging.
+
+## Air Agent 2 features (review branch)
+
+- **Modern dashboard:** WhatsApp-inspired responsive interface with a clear one-scan onboarding journey.
+- **Safer AI replies:** add/remove approved and blocked phone numbers, one-time replies per verified contact, reply cooldown, quiet hours, formatting, manual triggers, and an optional ten-message observed chat context window.
+- **Command Center:** messages from approved control numbers with a separate hashed PIN can request status, pause/resume, or email an allowlisted recipient. Commands never become unrestricted shell/AI actions.
+- **Bot email:** optional unique per-agent address, a private inbox, an outbound Resend adapter, and a signed inbound relay endpoint. **Email is not live until you configure a verified domain and a real inbound routing provider.**
+- **Controlled deployment:** a manual GitHub Actions production release path with approved SHA, root-only data backup and SSH host verification.
+
+For security details, configuration, test strategy and an explicit Hostinger rollout checklist, use [docs/DEPLOY_HOSTINGER.md](docs/DEPLOY_HOSTINGER.md). **Do not deploy this branch by simply restarting the old auto-pull production container.**

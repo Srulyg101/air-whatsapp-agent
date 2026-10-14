@@ -1,0 +1,65 @@
+name: Deploy Air Agent to Hostinger (manual)
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: "Reviewed 40-character commit SHA already merged into main"
+        required: true
+        type: string
+      confirm:
+        description: "Type DEPLOY to confirm production release"
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  release:
+    # Running a workflow from a feature branch MUST NOT deploy to production.
+    if: github.ref == 'refs/heads/main' && inputs.confirm == 'DEPLOY'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Validate release SHA
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo "Must provide full SHA"; exit 1; }
+      - name: Check out reviewed code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 0
+      - name: Ensure SHA is already merged to main
+        run: |
+          git fetch origin main --no-tags
+          git merge-base --is-ancestor HEAD origin/main || { echo "Release SHA has not been merged to main"; exit 1; }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install application dependencies
+        run: npm ci --omit=dev --no-audit --no-fund
+      - name: Run security and server regression checks
+        run: npm test
+      - name: Establish pinned SSH identity
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.VPS_DEPLOY_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.VPS_SSH_KNOWN_HOSTS }}
+        run: |
+          test -n "$SSH_PRIVATE_KEY" && test -n "$SSH_KNOWN_HOSTS"
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          eval "$(ssh-agent -s)"
+          printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
+          echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> "$GITHUB_ENV"
+      - name: Deploy exact commit and back up data
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test -n "$VPS_HOST" && test -n "$VPS_USER"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "$VPS_USER@$VPS_HOST" 'bash -s' -- "$RELEASE_SHA" < scripts/deploy-to-vps.sh
