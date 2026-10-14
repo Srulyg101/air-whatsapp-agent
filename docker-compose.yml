@@ -22,14 +22,15 @@ services:
       - MODEL=${MODEL:-qwen2.5:1.5b}
       - NUM_CTX=${NUM_CTX:-4096}
       - HISTORY_TURNS=${HISTORY_TURNS:-12}
-      - OPEN_SIGNUP=${OPEN_SIGNUP:-true}
       - RATE_LIMIT_PER_MIN=${RATE_LIMIT_PER_MIN:-12}
       - RETENTION_DAYS=${RETENTION_DAYS:-30}
-      - COOKIE_SECURE=${COOKIE_SECURE:-false}
+      - COOKIE_SECURE=${COOKIE_SECURE:-auto}
+      - WHISPER_MODEL=${WHISPER_MODEL:-onnx-community/whisper-base}
+      - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-15}
+      - DEPLOY_SHA=${DEPLOY_SHA:-initial}
       - OLLAMA_URL=http://ollama:11434
       - DATA_DIR=/data
       - PORT=3000
-      - DEPLOY_SHA=${DEPLOY_SHA:-initial}
     ports:
       - "${PUBLIC_PORT:-8080}:3000"
     volumes:
@@ -59,12 +60,13 @@ services:
     entrypoint: ["/bin/sh", "-c", "sleep 8; ollama pull ${MODEL:-qwen2.5:1.5b}"]
     restart: "no"
 
-  # Uptime monitoring dashboard on :3001
+  # Uptime monitoring dashboard. Only reachable from the server itself (security):
+  # open it with an SSH tunnel:  ssh -L 3001:localhost:3001 root@YOUR_IP  then http://localhost:3001
   uptime-kuma:
     image: louislam/uptime-kuma:1
     restart: unless-stopped
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     volumes:
       - uptime-data:/app/data
 

@@ -46,7 +46,7 @@ fi
 
 
 if command -v ufw >/dev/null && ufw status | grep -q active; then
-  ufw allow 8080/tcp >/dev/null; ufw allow 3001/tcp >/dev/null
+  ufw allow 8080/tcp >/dev/null
 fi
 
 say "Building and starting (first run downloads the AI model — a few minutes)"
@@ -55,10 +55,10 @@ docker compose up -d
 IP=$(curl -fsS -4 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 say "Done!"
 echo "  Dashboard:        http://${IP}:8080"
-echo "  Uptime monitor:   http://${IP}:3001  (add an HTTP monitor for http://${IP}:8080/health)"
+echo "  Uptime monitor:   ssh -L 3001:localhost:3001 root@${IP}  then open http://localhost:3001"
 echo "  Model download:   docker compose logs -f ollama-pull"
 echo "  App logs:         docker compose logs -f app"
 echo
 echo "  1) Open the dashboard and create the first account (it becomes admin)."
-echo "  2) 'Shared Air number' tab -> scan with the WhatsApp number everyone should message."
-echo "  3) Anyone else signs up and scans their own number in 'My WhatsApp'."
+echo "  2) Admin page: create accounts for other people (public sign-ups are off by default)."
+echo "  3) Each person scans their own number on the Home page. The AI only answers its owner until they change Reply rules."

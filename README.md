@@ -1,57 +1,60 @@
 # Air Agent — everyone's AI on WhatsApp
 
-Sign up, scan a QR code, and your WhatsApp has an AI agent. No API keys, no paid AI: everything runs on your own server with open-source models.
+Scan a QR code and your WhatsApp has an AI assistant that knows your business, listens to voice notes,
+and gets things done. Open-source AI by default, runs on your own server.
 
 ## What it does
 
-- **Shared number:** the admin links one WhatsApp number (the "Air number"). Anyone who messages it gets AI replies, with per-person memory.
-- **Bring your own number:** any user signs up, scans a QR code from *WhatsApp → Linked devices*, and then:
-  - chats with the agent in their **"Message yourself"** chat, and
-  - can optionally turn on **auto-reply** so the agent answers people who message them (replies start with 🤖).
-- Group replies only when the bot is @mentioned (off by default).
-- Custom personality/instructions per number.
-- `/help` and `/reset` commands inside WhatsApp.
-- Admin **Monitor** tab: AI engine status, model, users, linked numbers, message volume, reply speed, server RAM/load.
-- `/health` (for uptime monitors) and `/metrics` (Prometheus format).
-- Optional **Uptime Kuma** dashboard on port 3001.
+- **Reply rules** — choose exactly who it answers: *only me* (default), *people I choose*, or *everyone*.
+  Block list, groups (off / when @mentioned / chosen groups), quiet hours, away message,
+  and **automatic hand-off**: when you type in a chat yourself, the AI steps back.
+- **Knowledge & prompts** — tell it who it works for, its tone and rules, add FAQs, and upload
+  PDF / Word / Excel / CSV / text files. It looks up the right part of your files for each question.
+  You can also send a file to yourself in WhatsApp with the caption `/learn`.
+- **Voice notes** — understands voice notes (open-source Whisper on the server, or a fast speech API),
+  and can answer with a voice note.
+- **Actions** — just ask in WhatsApp: send emails (your SMTP/Gmail), place phone calls that speak a message
+  (Twilio for now), send WhatsApp messages, set reminders, save notes/leads, notify you when someone needs
+  a person, and trigger webhooks (Zapier, Make, n8n, CRM). Risky actions ask "yes / no" first.
+- **Bring your own AI** — server model by default (Ollama), or each user can plug in any OpenAI-compatible
+  provider (Groq, OpenRouter, Together, DeepSeek, OpenAI, self-hosted vLLM…).
+- **Conversations** — see what the AI answered, pause it per chat, clear its memory.
+- **Test your AI** — a playground that uses your real prompts and knowledge, with actions simulated.
+- **Admin** — create users (public sign-up is off by default), server AI model, download local models,
+  speech API, live stats, and an emergency **Disconnect all WhatsApp** button.
+- **Shared Air number** — the admin can link one number that answers everyone.
 
-## Stack (all open source)
+## Security defaults
 
-| Part | Project |
-|---|---|
-| WhatsApp link (QR, multi-device) | [Baileys](https://github.com/WhiskeySockets/Baileys) |
-| AI runtime | [Ollama](https://ollama.com) |
-| Default models | Qwen 2.5 (1.5B / 3B / 7B, picked by server RAM) |
-| App | Node.js + Express + SQLite |
-| Monitoring | Built-in dashboard + Uptime Kuma |
+- New numbers only answer their owner until the owner changes Reply rules.
+- Public sign-ups are **off**; the first account becomes admin and creates the others.
+- API keys and passwords are encrypted at rest (AES-256-GCM).
+- Cross-site requests are blocked, strict Content-Security-Policy, login rate limiting.
+- Uptime Kuma is bound to `127.0.0.1` (open it through an SSH tunnel).
+- Only messages the AI actually answered are stored (for its memory), and they are deleted after `RETENTION_DAYS`.
 
-## Install on a VPS (Ubuntu/Debian)
+## Install on a VPS
 
-**Option A – Hostinger Docker Manager (no terminal):** VPS → Docker Manager → Compose → *From URL* →
+**Hostinger Docker Manager (no terminal):** VPS → Docker Manager → Compose → *From URL* →
 `https://github.com/Srulyg101/air-whatsapp-agent` → Deploy.
 
-**Option B – terminal:**
+**Terminal:**
 
 ```bash
 git clone https://github.com/Srulyg101/air-whatsapp-agent.git air-agent && cd air-agent
 sudo bash install.sh
 ```
 
-The installer frees disk space, installs Docker, adds swap on small servers, chooses a model that fits your RAM, and starts everything. Then open `http://YOUR_SERVER_IP:8080`.
+Then open `http://YOUR_SERVER_IP:8080` and create the first account (it becomes admin).
 
-## Day-to-day
+## Updating
 
-```bash
-docker compose logs -f app          # bot logs
-docker compose restart app          # pulls latest code from GitHub on restart
-nano .env && docker compose up -d   # change model/name/settings
-```
+The app container pulls the latest code from GitHub every time it restarts, so pushing to `main`
+and restarting the `app` container deploys it. Changes to `docker-compose.yml` need a redeploy of the compose project.
 
-Linked WhatsApp sessions are stored in the `agent-data` volume and reconnect automatically after restarts.
+## Adding a domain + HTTPS
 
-## Adding a domain later
-
-Point an A record at the server, then put Caddy in front for free HTTPS:
+Point an A record at the server, then put Caddy in front:
 
 ```bash
 apt install -y caddy
@@ -59,8 +62,9 @@ echo 'agent.yourdomain.com { reverse_proxy localhost:8080 }' > /etc/caddy/Caddyf
 systemctl reload caddy
 ```
 
-Set `COOKIE_SECURE=true`, and run `docker compose up -d`.
+## Notes
 
-## Important
-
-This uses WhatsApp's linked-device (WhatsApp Web) protocol through an unofficial open-source library. It is not the official WhatsApp Business API. WhatsApp can change it or ban numbers that look like spam, so: use a dedicated number for the shared bot, keep rate limits on, and don't bulk-message people who didn't write first. For a fully official setup, the WhatsApp Cloud API can be added later as a second connector.
+- WhatsApp linking uses the unofficial [Baileys](https://github.com/WhiskeySockets/Baileys) library
+  (WhatsApp Web protocol). WhatsApp may disconnect or restrict numbers that behave like bots — avoid
+  mass messaging, and prefer the "Only me" / "People I choose" modes on personal numbers.
+- The first local voice note downloads the Whisper model (~80 MB) into the data volume.
