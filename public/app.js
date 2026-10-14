@@ -820,7 +820,11 @@ const OR_MODELS = [
 PAGES.model = {
   render() {
     const op = o();
-    if (!S.me.allowCustomAi) return `<div class="pagehead"><div><h1>AI model</h1><p>The brain behind your assistant.</p></div></div>${card('Server AI', '', '<p class="muted">Your account uses the server\'s AI model, chosen by the admin.</p>')}`;
+    if (!S.me.allowCustomAi) return `<div class="pagehead"><div><h1>AI model</h1><p>The brain behind your assistant.</p></div></div>
+      ${card('Server AI', '', '<p class="muted">Your account uses the server\'s open-source AI model.</p>')}
+      ${S.me.user.is_admin
+        ? card('OpenRouter sign-in is off', 'Enable personal AI providers to show the QR sign-in and model choices.', '<button class="btn lg" data-act="enableCustomAi" data-busy="Enabling…">Enable OpenRouter sign-in</button>')
+        : card('OpenRouter sign-in is off', 'Ask your Air Agent administrator to enable “Users may use their own AI provider.” Then return here and choose Sign in & connect.')}`;
     const onOR = op.ai_mode === 'custom' && op.ai_base_url === OR_BASE && (S.settings.secrets.ai_key || S.secretsDraft.ai_key);
     const known = OR_MODELS.some(([id]) => id === op.ai_model);
     return `
@@ -871,6 +875,11 @@ PAGES.model = {
     });
   },
   acts: {
+    enableCustomAi: (b) => busy(b, async () => {
+      await api('/api/admin/settings', { body: { allow_custom_ai: true } });
+      S.me = await api('/api/me'); await loadSettings(); rerender();
+      toast('OpenRouter sign-in enabled — click Sign in & connect to show the QR');
+    }),
     refreshORModels: (b) => busy(b, async () => { await refreshOpenRouterModels(); toast('OpenRouter models refreshed'); }),
     orSignin: (b) => busy(b, async () => {
       if (S.dirty) throw new Error('Save or discard your changes first');
