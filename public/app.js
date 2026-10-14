@@ -819,6 +819,7 @@ PAGES.model = {
           <p class="muted" style="margin:4px 0 0">Sign in with Google or email and choose ChatGPT, Claude, Llama and more. No API keys to copy. Pay only for what you use on your OpenRouter account.</p></div>
           <button class="btn lg" data-act="orSignin" data-busy="Opening…">Sign in & connect</button></div>
         <p class="small faint" style="margin:12px 0 0">Your assistant can't use a personal ChatGPT or Claude chat subscription — those services don't allow it — so this connects through OpenRouter instead.</p>`)}
+    ${location.protocol === 'http:' && /^\d{1,3}(\.\d{1,3}){3}$/.test(location.hostname) ? `<div class="banner warn"><div class="bi">🔒</div><div>Sign-in needs a secure (HTTPS) address. Open <a href="https://${location.hostname.replace(/\./g, '-')}.sslip.io/#/model"><b>https://${location.hostname.replace(/\./g, '-')}.sslip.io</b></a> (free HTTPS for this server), log in, and sign in from there.</div></div>` : ''}
     <div id="orQr"></div>
 
     ${card('Which AI answers', '', cards('ai_mode', [
@@ -848,7 +849,7 @@ PAGES.model = {
       if (S.dirty) throw new Error('Save or discard your changes first');
       const r = await api('/api/ai/openrouter/start' + tq());
       const box = $('#orQr'); if (!box) { location.href = r.url; return; }
-      box.innerHTML = card('Scan to sign in', 'Point your phone camera at this code and sign in to OpenRouter there. This page updates by itself when you are done.', `
+      box.innerHTML = card('Scan to sign in', 'Point your phone camera at this code, check that it shows your account, then sign in to OpenRouter. This page updates by itself when you are done.', `
         <div class="row" style="gap:20px;align-items:center;flex-wrap:wrap">
           <img src="${r.qr}" alt="OpenRouter sign-in QR code" width="220" height="220" style="border-radius:8px;background:#fff;padding:6px">
           <div class="grow"><p class="muted" id="orQrSt"><span class="spin"></span> Waiting for you to sign in…</p>
