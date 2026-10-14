@@ -43,22 +43,8 @@ services:
       - ollama
     logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
 
-  # Free HTTPS (Let's Encrypt). Open https://<your-ip-with-dashes>.sslip.io — no domain needed.
-  # Reads deploy/Caddyfile from the app's code volume, so it updates with git pulls.
-  caddy:
-    image: caddy:2
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - agent-code:/repo:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    entrypoint: ["/bin/sh", "-c", "until [ -f /repo/deploy/Caddyfile ]; do echo 'waiting for app code…'; sleep 3; done; exec caddy run --config /repo/deploy/Caddyfile --adapter caddyfile"]
-    depends_on:
-      - app
-    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+  # HTTPS: this VPS already runs buzz-prod's Caddy on ports 80/443, so Air Agent is
+  # served through that Caddy (see deploy/Caddyfile for the site block to add).
 
   # Open-source LLM runtime (not exposed to the internet)
   ollama:
@@ -95,5 +81,3 @@ volumes:
   agent-code:
   ollama-models:
   uptime-data:
-  caddy-data:
-  caddy-config:
