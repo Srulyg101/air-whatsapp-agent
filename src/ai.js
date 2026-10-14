@@ -78,7 +78,7 @@ function toAnthropicMessages(messages) {
   const out = [];
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
-    if (m.role === 'system') { system += (system ? '\\n\\n' : '') + String(m.content || ''); continue; }
+    if (m.role === 'system') { system += (system ? String.fromCharCode(10, 10) : '') + String(m.content || ''); continue; }
     if (m.role === 'tool') {
       const blocks = [];
       while (i < messages.length && messages[i].role === 'tool') {
@@ -126,7 +126,7 @@ async function anthropicChat(p, messages, tools, temperature, timeoutMs) {
   const data = await res.json();
   const blocks = data.content || [];
   return {
-    content: blocks.filter((b) => b.type === 'text').map((b) => b.text || '').join('\\n').trim(),
+    content: blocks.filter((b) => b.type === 'text').map((b) => b.text || '').join(String.fromCharCode(10)).trim(),
     toolCalls: blocks.filter((b) => b.type === 'tool_use').map((b) => ({ id: b.id, name: b.name, args: b.input || {} })),
   };
 }
