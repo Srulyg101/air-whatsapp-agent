@@ -2,6 +2,7 @@ const { isJidGroup, isJidBroadcast, isJidStatusBroadcast, isJidNewsletter } = re
 const config = require('./config');
 const ai = require('./ai');
 const { q, getSettings } = require('./db');
+const { approvedSender, blockedSender, maskedPeer } = require('./security');
 
 const HELP = `*${config.botName}* — your AI on WhatsApp\n\n` +
   `Just send a message and I'll reply.\n\n` +
@@ -67,9 +68,6 @@ function buildSystemPrompt(settings) {
 }
 
 const EMOJI_RE = /[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{FE0F}\u{200D}]/gu;
-const digits = (s) => String(s || '').replace(/\D/g, '');
-const numberList = (s) => String(s || '').split(/[,;\n]+/).map(digits).filter((n) => n.length >= 5);
-const matchesList = (ids, list) => list.length && ids.some((id) => list.some((n) => id.endsWith(n) || n.endsWith(id)));
 
 function inQuietHours(o) {
   if (!o.quiet_enabled) return false;
@@ -86,6 +84,7 @@ const awaySent = new Map(); // chat -> timestamp of last away message
  */
 async function handleMessage(m, ctx) {
   const { sessionId, isHouse, sock, sentIds } = ctx;
+  const isActive = ctx.isActive || (() => true);
   const jid = m.key.remoteJid;
   if (!jid || isJidBroadcast(jid) || isJidStatusBroadcast(jid) || isJidNewsletter(jid)) return;
   if (sentIds.has(m.key.id)) return; // our own reply echoing back
@@ -101,27 +100,40 @@ async function handleMessage(m, ctx) {
   const mine = myIds(sock);
   const chatIds = [jid, m.key.remoteJidAlt, m.key.senderPn].map(userPart).filter(Boolean);
   const isSelfChat = !group && chatIds.some((c) => mine.includes(c));
-  console.log(`[${sessionId}] msg chat=${jid} alt=${m.key.remoteJidAlt || m.key.senderPn || '-'} fromMe=${!!m.key.fromMe} self=${isSelfChat} group=${!!group} len=${text.length}`);
+  console.log(`[${sessionId}] msg fromMe=${!!m.key.fromMe} group=${!!group} peer=${maskedPeer(m)} len=${text.length}`);
 
+  let replyAction = 'command';
   const send = async (body) => {
-    const sent = await sock.sendMessage(jid, { text: body }, o.quote_reply ? { quoted: m } : undefined);
-    if (sent?.key?.id) sentIds.add(sent.key.id);
+    if (!isActive()) return;
+    // Re-evaluate permissions AFTER slow AI generation and delay.
+    const fresh = getSettings(sessionId);
+    if (!fresh.enabled) return;
+    if (!m.key.fromMe) {
+      if (blockedSender(m, fresh.options.block_list)) return;
+      if (!isHouse && (!approvedSender(m, fresh.options.allow_list) ||
+        (group ? !fresh.reply_groups : !fresh.auto_reply))) return;
+    }
+    try {
+      const sent = await sock.sendMessage(jid, { text: body }, o.quote_reply ? { quoted: m } : undefined);
+      if (sent?.key?.id) sentIds.add(sent.key.id);
+      q.addReplyAudit.run(sessionId, maskedPeer(m), replyAction, sent?.key?.id ? 'submitted' : 'unconfirmed');
+    } catch (err) {
+      q.addReplyAudit.run(sessionId, maskedPeer(m), replyAction, 'send_error');
+      throw err;
+    }
   };
 
   // Per-chat on/off: anyone can send /stop or /start in a chat.
   const cmd = text.trim().toLowerCase();
+  // Check the sender BEFORE command handling, including /start and /stop.
+  // Unknown @lid senders are denied on personal accounts unless a phone JID is available.
+  if (!m.key.fromMe && (blockedSender(m, o.block_list) ||
+    (!isHouse && !approvedSender(m, o.allow_list)))) return;
   const activeHere = m.key.fromMe || isHouse || (group ? !!settings.reply_groups : !!settings.auto_reply);
   if (!activeHere && (cmd === '/stop' || cmd === '/start')) return;
   if (cmd === '/stop') { q.mute.run(sessionId, jid); return send('Okay, I will stay quiet in this chat. Send /start to turn me back on.'); }
   if (cmd === '/start') { q.unmute.run(sessionId, jid); return send(`${config.botName} is back on in this chat.`); }
   if (q.isMuted.get(sessionId, jid)) return;
-
-  const senderIds = [m.key.participant, ...chatIds].map(digits).filter(Boolean);
-  if (!m.key.fromMe) {
-    if (matchesList(senderIds, numberList(o.block_list))) return;
-    const allow = numberList(o.allow_list);
-    if (allow.length && !matchesList(senderIds, allow)) return;
-  }
 
   let shouldReply = false;
   let prefix = '';
@@ -141,18 +153,20 @@ async function handleMessage(m, ctx) {
     shouldReply = !!settings.auto_reply; // personal number answering contacts
   }
   if (!shouldReply) return;
+  replyAction = 'ai';
   if (!m.key.fromMe && o.prefix_on && o.prefix_text) prefix = o.prefix_text.trim() + ' ';
 
   const sender = m.key.participant || jid;
   if (rateLimited(`${sessionId}:${sender}`)) return;
 
-  if (cmd === '/help' || cmd === 'help') return send(HELP);
-  if (cmd === '/reset') { q.clearChat.run(sessionId, jid); return send('Memory cleared. Fresh start 👍'); }
+  if (cmd === '/help' || cmd === 'help') { replyAction = 'command'; return send(HELP); }
+  if (cmd === '/reset') { replyAction = 'command'; q.clearChat.run(sessionId, jid); return send('Memory cleared. Fresh start 👍'); }
 
   if (!m.key.fromMe && inQuietHours(o)) {
     const last = awaySent.get(`${sessionId}:${jid}`) || 0;
     if (o.away_message && Date.now() - last > 6 * 3600_000) {
       awaySent.set(`${sessionId}:${jid}`, Date.now());
+      replyAction = 'away';
       return send(o.away_message);
     }
     return;
@@ -169,6 +183,7 @@ async function handleMessage(m, ctx) {
   } catch (err) {
     console.error(`[${sessionId}] AI error:`, err.message);
     if (o.typing) { try { await sock.sendPresenceUpdate('paused', jid); } catch (_) {} }
+    replyAction = 'error';
     return send('Sorry, my brain is warming up. Try again in a minute.');
   }
   if (!o.use_emojis) reply = reply.replace(EMOJI_RE, '').replace(/[ \t]{2,}/g, ' ').trim();
