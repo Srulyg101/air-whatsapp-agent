@@ -1,0 +1,74 @@
+name: air-agent
+
+# Works with `docker compose up -d` on any server AND with Hostinger's
+# Docker Manager "Compose from URL" (no local build or .env needed).
+# Override settings with environment variables or a .env file.
+
+services:
+  app:
+    image: node:22-bookworm
+    restart: unless-stopped
+    working_dir: /srv
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        if [ -d /srv/app/.git ]; then git -C /srv/app pull --ff-only || true;
+        else git clone --depth 1 ${REPO_URL:-https://github.com/Srulyg101/air-whatsapp-agent.git} /srv/app; fi
+        cd /srv/app && npm install --omit=dev --no-audit --no-fund && exec node src/server.js
+    environment:
+      - BOT_NAME=${BOT_NAME:-Air Agent}
+      - MODEL=${MODEL:-qwen2.5:1.5b}
+      - NUM_CTX=${NUM_CTX:-4096}
+      - HISTORY_TURNS=${HISTORY_TURNS:-12}
+      - OPEN_SIGNUP=${OPEN_SIGNUP:-true}
+      - RATE_LIMIT_PER_MIN=${RATE_LIMIT_PER_MIN:-12}
+      - RETENTION_DAYS=${RETENTION_DAYS:-30}
+      - COOKIE_SECURE=${COOKIE_SECURE:-false}
+      - OLLAMA_URL=http://ollama:11434
+      - DATA_DIR=/data
+      - PORT=3000
+    ports:
+      - "${PUBLIC_PORT:-80}:3000"
+    volumes:
+      - agent-data:/data
+      - agent-code:/srv/app
+    depends_on:
+      - ollama
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+
+  # Open-source LLM runtime (not exposed to the internet)
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama-models:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=30m
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+
+  # One-shot: downloads the model on first start
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on: [ollama]
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: ["/bin/sh", "-c", "sleep 8; ollama pull ${MODEL:-qwen2.5:1.5b}"]
+    restart: "no"
+
+  # Uptime monitoring dashboard on :3001
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - uptime-data:/app/data
+
+volumes:
+  agent-data:
+  agent-code:
+  ollama-models:
+  uptime-data:
