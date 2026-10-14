@@ -54,6 +54,9 @@
       <div id="nameWrap"><label>Name</label><input id="name" autocomplete="name"></div>
       <label>Email</label><input id="email" type="email" autocomplete="email">
       <label>Password</label><input id="password" type="password" autocomplete="current-password">
+      <div id="setupTokenWrap" class="hidden"><label>Initial admin setup token (from your VPS environment)</label>
+        <input id="setupToken" type="password" autocomplete="off">
+        <p class="muted">For a fresh installation, configure BOOTSTRAP_ADMIN_TOKEN (24+ characters) before creating the first admin.</p></div>
       <div class="err" id="authErr"></div>
       <div class="row"><button id="authBtn" onclick="submitAuth()">Create account</button>
         <a href="#" id="authSwitch" onclick="switchAuth();return false">I already have an account</a></div>
@@ -119,7 +122,7 @@
             <label class="toggle personal"><input type="checkbox" data-opt="ai_trigger"> Let me summon it in any chat with a trigger word</label>
             <label class="muted personal">Trigger word</label>
             <input class="personal" data-opt="trigger_word" placeholder="/ai">
-            <label class="muted">Only reply to these numbers (comma separated, empty = everyone)</label>
+            <label class="muted">Approved international numbers (required for personal incoming replies; empty = nobody)</label>
             <input data-opt="allow_list" placeholder="+1 718 555 1234, +972 50 123 4567">
             <label class="muted">Never reply to these numbers</label>
             <input data-opt="block_list" placeholder="+1 347 555 0000">
@@ -164,13 +167,23 @@
       <div class="card"><h2>Live monitor</h2><div class="stats" id="stats"></div></div>
       <div class="card"><h2>Sessions</h2><table id="sessTable"></table></div>
       <div class="card"><h2>Users</h2><table id="userTable"></table></div>
+      <div class="card"><h2>Emergency WhatsApp controls</h2>
+        <p class="muted">Disconnect all linked WhatsApp devices and erase the locally stored session credentials. Reconnect each device manually later. Also check Linked Devices on each phone.</p>
+        <button class="danger" onclick="disconnectAll()">Disconnect all WhatsApp sessions</button>
+        <div class="err" id="panicResult"></div>
+      </div>
+      <div class="card"><h2>Reply audit (last 100)</h2>
+        <p class="muted">Only time, session, last four digits (when available), action and submission result. No message content.</p>
+        <table id="auditTable"></table>
+      </div>
     </div>
   </section>
 </div>
 
 <script>
 const $ = (id) => document.getElementById(id);
-let me = null, tab = 'mine', mode = 'signup', poll = null;
+let me = null, tab = 'mine', mode = 'login', poll = null;
+let authSetup = { firstUser: false, signupEnabled: false };
 const api = async (url, opts = {}) => {
   const r = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...opts, body: opts.body ? JSON.stringify(opts.body) : undefined });
   const d = await r.json().catch(() => ({}));
@@ -180,22 +193,36 @@ const api = async (url, opts = {}) => {
 const target = () => (tab === 'house' ? '?target=house' : '');
 
 function switchAuth() {
+  if (!authSetup.firstUser && !authSetup.signupEnabled) return;
   mode = mode === 'signup' ? 'login' : 'signup';
   $('authBtn').textContent = mode === 'signup' ? 'Create account' : 'Log in';
   $('authSwitch').textContent = mode === 'signup' ? 'I already have an account' : 'Create a new account';
   $('nameWrap').classList.toggle('hidden', mode === 'login');
+  $('setupTokenWrap').classList.toggle('hidden', !(mode === 'signup' && authSetup.firstUser));
 }
 async function submitAuth() {
   $('authErr').textContent = '';
   try {
-    await api('/api/' + mode, { method: 'POST', body: { email: $('email').value, password: $('password').value, name: $('name').value } });
+    await api('/api/' + mode, { method: 'POST', body: { email: $('email').value, password: $('password').value, name: $('name').value, setupToken: $('setupToken').value } });
     boot();
   } catch (e) { $('authErr').textContent = e.message; }
 }
 async function logout() { await api('/api/logout', { method: 'POST' }); location.reload(); }
 
 async function boot() {
-  try { me = await api('/api/me'); } catch { $('authView').classList.remove('hidden'); $('appView').classList.add('hidden'); return; }
+  try { me = await api('/api/me'); } catch {
+    $('authView').classList.remove('hidden'); $('appView').classList.add('hidden');
+    authSetup = await api('/api/auth/config').catch(() => ({ firstUser: false, signupEnabled: false }));
+    mode = (authSetup.firstUser || authSetup.signupEnabled) ? 'signup' : 'login';
+    // Start in login mode for existing installations, even if signup is enabled.
+    if (!authSetup.firstUser) mode = 'login';
+    $('authBtn').textContent = mode === 'signup' ? 'Create account' : 'Log in';
+    $('authSwitch').textContent = mode === 'signup' ? 'I already have an account' : 'Create a new account';
+    $('authSwitch').classList.toggle('hidden', !authSetup.firstUser && !authSetup.signupEnabled);
+    $('nameWrap').classList.toggle('hidden', mode === 'login');
+    $('setupTokenWrap').classList.toggle('hidden', !(mode === 'signup' && authSetup.firstUser));
+    return;
+  }
   $('authView').classList.add('hidden'); $('appView').classList.remove('hidden'); $('hdr').classList.remove('hidden');
   $('brand').textContent = me.botName; $('who').textContent = me.user.email;
   document.querySelectorAll('.adminOnly').forEach((el) => el.classList.toggle('hidden', !me.user.is_admin));
@@ -258,6 +285,7 @@ async function testAI() {
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 async function loadAdmin() {
   const s = await api('/api/admin/stats');
+  const audit = await api('/api/admin/reply-audit').catch(() => ({ events: [] }));
   const box = (label, val) => `<div class="card" style="margin:0;padding:14px"><div class="muted">${label}</div><div class="stat">${esc(val)}</div></div>`;
   $('stats').innerHTML = [
     box('AI engine', s.ollama.ok ? (s.ollama.modelReady ? 'Ready' : 'Downloading model') : 'DOWN'),
@@ -271,6 +299,19 @@ async function loadAdmin() {
     s.sessions.map((x) => `<tr><td>${esc(x.id)}</td><td>${esc(x.status)}</td><td>${esc(x.phone || '')}</td><td>${x.handled}</td></tr>`).join('');
   $('userTable').innerHTML = '<tr><th>#</th><th>Email</th><th>Name</th><th>Admin</th><th>Joined</th></tr>' +
     s.userList.map((u) => `<tr><td>${u.id}</td><td>${esc(u.email)}</td><td>${esc(u.name)}</td><td>${u.is_admin ? '✓' : ''}</td><td>${new Date(u.created_at * 1000).toLocaleDateString()}</td></tr>`).join('');
+  $('auditTable').innerHTML = '<tr><th>Time</th><th>Session</th><th>Peer</th><th>Action</th><th>Status</th></tr>' +
+    audit.events.map((e) => `<tr><td>${new Date(e.ts * 1000).toLocaleString()}</td><td>${esc(e.session_id)}</td><td>${esc(e.peer_masked)}</td><td>${esc(e.action)}</td><td>${esc(e.outcome)}</td></tr>`).join('');
+
+}
+async function disconnectAll() {
+  if (!confirm('EMERGENCY DISCONNECT: This will unlink every saved WhatsApp session from this server. Continue?')) return;
+  if (!confirm('Confirm: disconnect ALL WhatsApp sessions and erase their local login credentials?')) return;
+  $('panicResult').textContent = '';
+  try {
+    const result = await api('/api/admin/disconnect-all', { method: 'POST' });
+    $('panicResult').textContent = 'Disconnected ' + result.disconnected + ' sessions. Also review WhatsApp Linked Devices on each phone.';
+    loadAdmin();
+  } catch (err) { $('panicResult').textContent = err.message; }
 }
 $('testIn').addEventListener('keydown', (e) => e.key === 'Enter' && testAI());
 $('password').addEventListener('keydown', (e) => e.key === 'Enter' && submitAuth());
