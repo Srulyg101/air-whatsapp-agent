@@ -29,6 +29,7 @@ services:
       - OLLAMA_URL=http://ollama:11434
       - DATA_DIR=/data
       - PORT=3000
+      - DEPLOY_SHA=${DEPLOY_SHA:-initial}
     ports:
       - "${PUBLIC_PORT:-8080}:3000"
     volumes:
