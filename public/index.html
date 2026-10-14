@@ -273,8 +273,17 @@ async function saveSettings() {
   document.querySelectorAll('[data-opt]').forEach((el) => {
     options[el.dataset.opt] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) : el.value;
   });
-  await api('/api/settings' + target(), { method: 'POST', body: { persona: $('persona').value, enabled: $('enabled').checked, auto_reply: $('auto_reply').checked, reply_groups: $('reply_groups').checked, options } });
-  ['saved', 'saved2'].forEach((id) => { $(id).textContent = 'Saved ✓'; setTimeout(() => ($(id).textContent = ''), 2000); });
+  try {
+    await api('/api/settings' + target(), { method: 'POST', body: {
+      persona: $('persona').value, enabled: $('enabled').checked,
+      auto_reply: $('auto_reply').checked, reply_groups: $('reply_groups').checked, options,
+    } });
+    ['saved', 'saved2'].forEach((id) => {
+      $(id).textContent = 'Saved ✓'; setTimeout(() => ($(id).textContent = ''), 2000);
+    });
+  } catch (err) {
+    ['saved', 'saved2'].forEach((id) => { $(id).textContent = err.message; });
+  }
 }
 async function testAI() {
   $('testOut').textContent = 'Thinking…';
