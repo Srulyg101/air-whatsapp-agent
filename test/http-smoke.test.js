@@ -75,6 +75,13 @@ test('server denies unauthenticated access and requires private admin bootstrap'
     assert.equal((await state.json()).answeredChats, 0);
     assert.equal((await post('/api/reply-state/reset', {}, cookie)).status, 200);
 
+    // Saving only options must not inadvertently unpause an agent.
+    assert.equal((await post('/api/settings', { enabled: false }, cookie)).status, 200);
+    assert.equal((await post('/api/settings', { options: { reply_once: true } }, cookie)).status, 200);
+    let saved = await fetch(url + '/api/settings', { headers: { Cookie: cookie } });
+    assert.equal((await saved.json()).enabled, 0);
+    assert.equal((await post('/api/settings', { enabled: true }, cookie)).status, 200);
+
     // Controller stays off without explicit approved phone numbers.
     assert.equal((await post('/api/settings', {
       options: { control_enabled: true, control_numbers: '' },
@@ -97,7 +104,7 @@ test('server denies unauthenticated access and requires private admin bootstrap'
     assert.equal(mailbox.status, 200);
     const { address } = await mailbox.json();
     assert.match(address, /^agent-[0-9a-f]{10}@airagent\.test$/);
-    const payload = JSON.stringify({ to: address, from:'client@example.test',
+    const payload = JSON.stringify({ messageId:'test-incoming-email-001', to: address, from:'client@example.test',
       subject:'Hello bot', text:'A private test message' });
     const timestamp = String(Math.floor(Date.now() / 1000));
     const secretKey = 'for-local-tests-only-32-character-inbound-secret';
@@ -108,6 +115,12 @@ test('server denies unauthenticated access and requires private admin bootstrap'
         'X-Air-Timestamp':timestamp, 'X-Air-Signature':signature },body:payload,
     });
     assert.equal(inbound.status, 202);
+    // Signed retry with the same provider ID must not duplicate the inbox item.
+    const repeated = await fetch(url + '/api/webhooks/inbound-email', {
+      method:'POST',headers:{ 'Content-Type':'application/json',
+        'X-Air-Timestamp':timestamp, 'X-Air-Signature':signature },body:payload,
+    });
+    assert.equal(repeated.status, 202);
     const unsigned = await fetch(url + '/api/webhooks/inbound-email', {
       method:'POST',headers:{ 'Content-Type':'application/json' },body:payload,
     });
