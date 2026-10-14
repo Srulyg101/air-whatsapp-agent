@@ -20,7 +20,8 @@ async function handleControl(message, { sock, sessionId, isHouse, isActive }) {
   const text = String(message.message?.conversation || message.message?.extendedTextMessage?.text || '').trim();
   if (!/^\/do(?:\s|$)/i.test(text)) return false;
   // Reserve /do entirely: normal AI must never interpret privileged messages.
-  if (!jid || isHouse || message.key?.fromMe || jid.endsWith('@g.us') || !isActive()) return true;
+  // The admin may assign a controller to either a personal agent or a shared Air number.
+  if (!jid || message.key?.fromMe || jid.endsWith('@g.us') || !isActive()) return true;
   const settings = getSettings(sessionId);
   if (!matchesControl(message, settings.options)) return true; // no response to unknown sender
   const match = text.match(CMD);
