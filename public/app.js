@@ -65,8 +65,15 @@ const cards = (k, opts) => `<div class="choices">${opts.map(([v, t, d, ico]) => 
   <div class="ct">${ico || ''} ${t}</div><div class="cd">${d}</div></label>`).join('')}</div>`;
 const secret = (name, label, ph = '', hint = '') => `
   <div class="field"><label class="lbl">${label}</label><input type="password" autocomplete="new-password" data-secret="${name}" value="${esc(S.secretsDraft[name] ?? S.settings.secrets[name] ?? '')}" placeholder="${esc(ph)}">${hint ? `<div class="hint">${hint}</div>` : ''}</div>`;
-const card = (title, desc, body, right = '') => `<section class="card"><div class="head"><div><h2>${title}</h2>${desc ? `<p>${desc}</p>` : ''}</div>${right}</div>${body}</section>`;
+const chipList = (k) => String(o()[k] || '').split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean);
+const chips = (k, label, hint = '', ph = '+1 718 555 1234') => `
+  <div class="field"><label class="lbl">${label}</label>
+    <div class="chipadd"><input id="chip-${k}" data-chip="${k}" placeholder="${esc(ph)}" inputmode="tel"><button class="btn ghost" data-act="chipAdd" data-k="${k}">+ Add</button></div>
+    <div class="chips">${chipList(k).map((n, i) => `<span class="chip">${esc(n)}<button data-act="chipDel" data-k="${k}" data-i="${i}" aria-label="Remove ${esc(n)}">✕</button></span>`).join('') || '<span class="small faint">None yet</span>'}</div>
+    ${hint ? `<div class="hint">${hint}</div>` : ''}</div>`;
+const card = (title, desc, body, right = '') => `<section class="card">${title || desc || right ? `<div class="head"><div>${title ? `<h2>${title}</h2>` : ''}${desc ? `<p>${desc}</p>` : ''}</div>${right}</div>` : ''}${body}</section>`;
 const pill = (cls, text) => `<span class="pill ${cls}"><span class="dot"></span>${esc(text)}</span>`;
+const LOGO = '<div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.4L3 21l2.1-5.6A8.4 8.4 0 1 1 21 11.5z"/><path d="M12 7.5l1.2 2.6 2.8.4-2 2 .5 2.8-2.5-1.3-2.5 1.3.5-2.8-2-2 2.8-.4z" fill="currentColor" stroke="none"/></svg></div>';
 const empty = (ico, text) => `<div class="empty"><div class="ei">${ico}</div>${text}</div>`;
 
 // ---------- boot ----------
@@ -82,12 +89,15 @@ async function boot() {
 async function loadSettings() {
   S.settings = await api('/api/settings' + tq());
   S.draft = clone({ options: S.settings.options, persona: S.settings.persona, enabled: S.settings.enabled });
-  S.secretsDraft = {}; S.dirty = false;
+  S.secretsDraft = {}; S.dirty = false; S.mail = undefined;
   S.wa = await api('/api/wa/status' + tq()).catch(() => null);
 }
 
 function route() {
-  const page = (location.hash.replace(/^#\/?/, '') || 'home').split('?')[0];
+  const [pagePart, qs] = (location.hash.replace(/^#\/?/, '') || 'home').split('?');
+  const page = pagePart;
+  if (qs && /signin=ok/.test(qs)) { setTimeout(() => toast('Signed in ✓ — your smarter AI is connected'), 300); loadSettings().then(() => rerender()); history.replaceState(null, '', '#/' + page); }
+  if (qs && /signin=failed/.test(qs)) { setTimeout(() => toast('Sign-in did not finish. Try again.', true), 300); history.replaceState(null, '', '#/' + page); }
   if (S.dirty && page !== S.page && !confirm('You have unsaved changes. Leave without saving?')) { location.hash = '#/' + S.page; return; }
   if (S.dirty && page !== S.page) { S.draft = clone({ options: S.settings.options, persona: S.settings.persona, enabled: S.settings.enabled }); S.secretsDraft = {}; S.dirty = false; }
   S.page = PAGES[page] ? page : 'home';
@@ -95,24 +105,45 @@ function route() {
   renderShell();
 }
 
-// ---------- auth screen ----------
+// ---------- landing / sign-in ----------
 function renderAuth(mode) {
   const signup = mode === 'signup';
+  const first = S.pub.firstUser;
   $('#root').innerHTML = `
-  <div class="auth"><div class="card">
-    <div class="brand"><div class="logo">A</div>${esc(S.pub.botName)}</div>
-    <h1>${signup ? (S.pub.firstUser ? 'Set up your server' : 'Create your account') : 'Welcome back'}</h1>
-    <p class="muted">${S.pub.firstUser ? 'The first account becomes the admin of this server.' : 'Your own AI on WhatsApp — it answers, listens to voice notes, and gets things done.'}</p>
-    <form id="authForm" class="stack" style="margin-top:16px">
-      ${signup ? '<div><label class="lbl">Name</label><input id="aName" autocomplete="name"></div>' : ''}
-      <div><label class="lbl">Email</label><input id="aEmail" type="email" autocomplete="email" required></div>
-      <div><label class="lbl">Password</label><input id="aPass" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" required minlength="8"></div>
-      <div class="hint" id="aErr" style="color:var(--danger)"></div>
-      <button class="btn" type="submit" style="width:100%;justify-content:center">${signup ? 'Create account' : 'Log in'}</button>
-    </form>
-    ${S.pub.signupOpen && !S.pub.firstUser ? `<p class="small muted" style="margin-top:14px;text-align:center">${signup ? 'Already have an account?' : 'New here?'} <a href="#" id="aSwitch">${signup ? 'Log in' : 'Create an account'}</a></p>` : ''}
-    ${!S.pub.signupOpen && !signup ? '<p class="small faint" style="margin-top:14px;text-align:center">Accounts are created by the admin.</p>' : ''}
-  </div></div>`;
+  <div class="landing">
+    <div class="top">${LOGO}<span>${esc(S.pub.botName)}</span></div>
+    <div class="hero">
+      <div class="l">
+        <h1>Your WhatsApp, now with an <b>AI assistant</b>.<br>Scan any WhatsApp number — done.</h1>
+        <ol class="wsteps">
+          <li><span>${first ? 'Create the admin account for this server' : signup ? 'Create your free account' : 'Log in to your account'}</span></li>
+          <li><span>On your phone open WhatsApp → <b>Linked devices</b> → <b>Link a device</b></span></li>
+          <li>Scan the QR code. Your AI is live — it only answers who you choose.</li>
+        </ol>
+        <div class="sub">Works with personal and WhatsApp Business numbers. Text, voice notes, groups.</div>
+      </div>
+      <div class="r">
+        <h2 style="font-size:20px;font-weight:400;margin-bottom:18px">${first ? 'Set up your server' : signup ? 'Create your account' : 'Log in'}</h2>
+        <form id="authForm" class="stack">
+          ${signup ? '<div><label class="lbl" for="aName">Your name</label><input id="aName" autocomplete="name"></div>' : ''}
+          <div><label class="lbl" for="aEmail">Email</label><input id="aEmail" type="email" autocomplete="email" required></div>
+          <div><label class="lbl" for="aPass">Password</label><input id="aPass" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" required minlength="8"></div>
+          <div class="hint" id="aErr" style="color:var(--danger)"></div>
+          <button class="btn lg" type="submit" style="width:100%;justify-content:center">${signup ? 'Create account' : 'Log in'}</button>
+        </form>
+        ${S.pub.signupOpen && !first ? `<p class="small muted" style="margin-top:16px;text-align:center">${signup ? 'Already have an account?' : 'New here?'} <a href="#" id="aSwitch">${signup ? 'Log in' : 'Create an account'}</a></p>` : ''}
+        ${!S.pub.signupOpen && !signup ? '<p class="small faint" style="margin-top:16px;text-align:center">New accounts are created by the admin.</p>' : ''}
+        <div class="lock" style="margin-top:18px">🔒 Your chats stay on this server. The AI only answers who you allow.</div>
+      </div>
+    </div>
+    <div class="feats">
+      <div class="feat"><div class="fi">💬</div><b>Replies like you</b><span>Answers only you, people you pick, or everyone. Steps back when you reply.</span></div>
+      <div class="feat"><div class="fi">🧠</div><b>Knows your business</b><span>Upload price lists, menus and FAQs — it answers from them.</span></div>
+      <div class="feat"><div class="fi">🎙️</div><b>Hears voice notes</b><span>Understands voice notes and can answer by voice.</span></div>
+      <div class="feat"><div class="fi">⚡</div><b>Gets things done</b><span>Emails, calls, reminders and messages — just ask in WhatsApp.</span></div>
+    </div>
+    <div class="legal">${esc(S.pub.botName)} is an independent product. It is not affiliated with, endorsed by or sponsored by WhatsApp or Meta.</div>
+  </div>`;
   $('#aSwitch')?.addEventListener('click', (e) => { e.preventDefault(); renderAuth(signup ? 'login' : 'signup'); });
   $('#authForm').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -130,6 +161,7 @@ const NAV = [
   ['replies', '💬', 'Reply rules'],
   ['brain', '🧠', 'Knowledge & prompts'],
   ['actions', '⚡', 'Actions'],
+  ['email', '📧', 'Bot email'],
   ['voice', '🎙️', 'Voice notes'],
   ['model', '🤖', 'AI model'],
   ['chats', '🗂️', 'Conversations'],
@@ -145,10 +177,10 @@ function renderShell() {
   const st = S.wa?.status;
   const statusPill = st === 'open' ? pill('ok', 'Connected') : st === 'qr' || st === 'connecting' ? pill('warn', 'Connecting') : pill('bad', 'Not connected');
   $('#root').innerHTML = `
-  <div class="mobilebar"><button class="btn ghost sm" data-act="menu" aria-label="Menu">☰</button><div class="brand"><div class="logo">A</div>${esc(S.me.botName)}</div>${statusPill}</div>
+  <div class="mobilebar"><button class="btn ghost sm" data-act="menu" aria-label="Menu">☰</button><div class="brand">${LOGO}${esc(S.me.botName)}</div>${statusPill}</div>
   <div class="app">
     <aside class="side" id="side">
-      <div class="brand"><div class="logo">A</div>${esc(S.me.botName)}</div>
+      <div class="brand">${LOGO}${esc(S.me.botName)}</div>
       <div class="numberSwitch">
         ${isAdmin ? `<label class="lbl small faint" for="targetSel">Settings for</label>
         <select id="targetSel"><option value="mine" ${S.target === 'mine' ? 'selected' : ''}>My WhatsApp</option><option value="house" ${S.target === 'house' ? 'selected' : ''}>Shared Air number</option></select>` : '<div class="small faint">My WhatsApp</div>'}
@@ -157,7 +189,7 @@ function renderShell() {
       <nav class="nav">${NAV.map(([id, ico, label, adm]) => id === '-' ? '<div class="sep"></div>' : (adm && !isAdmin ? '' : `<a href="#/${id}" class="${S.page === id ? 'active' : ''}"><span class="ico">${ico}</span>${label}</a>`)).join('')}</nav>
       <div class="foot"><div class="faint small">${esc(S.me.user.email)} · v${esc(S.me.version)}</div><div class="row"><button class="btn ghost sm" data-act="theme">◐ Theme</button><button class="btn ghost sm" data-act="logout">Log out</button></div></div>
     </aside>
-    <main class="main" id="main"></main>
+    <div class="mainwrap"><main class="main" id="main"></main></div>
   </div>
   <div class="savebar" id="savebar"><div><b>Unsaved changes</b> <span class="muted small">— your AI keeps using the old settings until you save.</span></div><div class="row"><button class="btn ghost sm" data-act="discard">Discard</button><button class="btn" data-act="save" data-busy="Saving…">Save changes</button></div></div>`;
   $('#targetSel')?.addEventListener('change', async (e) => {
@@ -174,6 +206,9 @@ function renderShell() {
 function markDirty(on) { S.dirty = on; $('#savebar')?.classList.toggle('show', on); }
 
 // ---------- form binding ----------
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.dataset?.chip) { e.preventDefault(); ACTIONS.chipAdd({ dataset: { k: e.target.dataset.chip } }); }
+});
 document.addEventListener('input', onField);
 document.addEventListener('change', onField);
 function onField(e) {
@@ -182,7 +217,7 @@ function onField(e) {
     const k = el.dataset.opt; const def = S.settings.options[k];
     let v;
     if (el.type === 'checkbox') v = el.checked;
-    else if (el.type === 'radio') { if (!el.checked) return; v = el.value; }
+    else if (el.type === 'radio') { if (!el.checked) return; v = typeof def === 'number' ? Number(el.value) : el.value; }
     else if (typeof def === 'number') v = el.value === '' ? 0 : Number(el.value);
     else v = el.value;
     if (o()[k] === v) return;
@@ -190,6 +225,10 @@ function onField(e) {
     if (el.dataset.rerender !== undefined || el.type === 'radio' || (el.type === 'checkbox' && el.dataset.rerender !== 'no')) rerenderSoon(el);
   } else if (el.dataset.secret) {
     S.secretsDraft[el.dataset.secret] = el.value; markDirty(true);
+  } else if (el.dataset.special === 'handoff') {
+    if (e.type !== 'change') return;
+    if (el.value === 'forever') o().pause_forever = true; else { o().pause_forever = false; o().pause_minutes = Number(el.value); }
+    markDirty(true);
   } else if (el.id === 'masterSw') {
     if (e.type !== 'change') return;
     const on = el.checked;
@@ -219,7 +258,7 @@ async function save(btn) {
     for (const [k, v] of Object.entries(S.secretsDraft)) secrets[k] = v;
     S.settings = await api('/api/settings' + tq(), { body: { options: o(), persona: S.draft.persona, enabled: S.draft.enabled, secrets } });
     S.draft = clone({ options: S.settings.options, persona: S.settings.persona, enabled: S.settings.enabled });
-    S.secretsDraft = {};
+    S.secretsDraft = {}; S.mail = undefined;
     markDirty(false);
     toast('Saved ✓');
     rerender();
@@ -251,6 +290,18 @@ const ACTIONS = {
     setTimeout(() => { const rows = $$(`[data-list="${k}"]`); rows[rows.length - (k === 'faq' ? 2 : 3)]?.focus(); }, 0);
   },
   listDel: (b) => { const k = b.dataset.list; o()[k].splice(Number(b.dataset.i), 1); markDirty(true); rerender(); },
+  chipAdd: (b) => {
+    const k = b.dataset.k; const inp = $(`#chip-${k}`); const v = inp.value.trim();
+    if (!v) return;
+    const digits = v.replace(/[^\d]/g, '');
+    if (digits.length < 7) { toast('Enter a full number with country code', true); return; }
+    const pretty = '+' + digits;
+    const cur = chipList(k);
+    if (!cur.some((x) => x.replace(/\D/g, '') === digits)) cur.push(pretty);
+    o()[k] = cur.join(', '); markDirty(true); rerender();
+    setTimeout(() => $(`#chip-${k}`)?.focus(), 0);
+  },
+  chipDel: (b) => { const k = b.dataset.k; const cur = chipList(k); cur.splice(Number(b.dataset.i), 1); o()[k] = cur.join(', '); markDirty(true); rerender(); },
 };
 
 // =====================================================================
@@ -272,8 +323,9 @@ PAGES.home = {
     return `
       <div class="pagehead"><div><h1>${house ? 'Shared Air number' : `Hi ${esc(S.me.user.name || '')}`.trim()}</h1><p>${house ? 'Anyone who messages this number gets AI replies.' : 'Your AI assistant on WhatsApp.'}</p></div></div>
       ${banners.join('')}
-      <div class="grid2">
-        <section class="card" id="connectCard">${connectBody(st)}</section>
+      ${st !== 'open' ? `<section class="card" id="connectCard">${connectBody(st)}</section>` : ''}
+      <div class="${st === 'open' ? 'grid2' : ''}">
+        ${st === 'open' ? `<section class="card" id="connectCard">${connectBody(st)}</section>` : ''}
         <section class="card">
           <div class="head"><div><h2>Quick controls</h2><p>The most important switches.</p></div></div>
           <div class="sw"><div><div class="t">AI is ${S.draft.enabled ? 'on' : 'off'}</div><div class="d">Master switch for this number.</div></div>
@@ -316,19 +368,27 @@ function connectBody(st) {
   const w = S.wa || {};
   if (st === 'open') return `
     <div class="head"><div><h2>WhatsApp</h2><p>Linked and running.</p></div>${pill('ok', 'Connected')}</div>
-    <div class="phone">+${esc(w.me?.phone || '')}</div><div class="muted">${esc(w.me?.name || '')}</div>
+    <div class="connected"><div class="big">📱</div><div><div class="phone">+${esc(w.me?.phone || '')}</div><div class="muted">${esc(w.me?.name || '')}</div></div></div>
     <div class="divider"></div>
-    <div class="row between"><span class="small muted">To stop instantly: unlink here, or WhatsApp → Linked devices.</span><button class="btn danger sm" data-act="unlink" data-busy="Unlinking…">Unlink</button></div>`;
-  if (st === 'qr' && w.qr) return `
-    <div class="head"><div><h2>Scan to connect</h2><p>Links Air Agent like WhatsApp Web.</p></div>${pill('warn', 'Waiting for scan')}</div>
-    <div class="qrbox"><img class="qr" src="${w.qr}" alt="WhatsApp QR code">
-      <ol class="steps"><li>Open WhatsApp on your phone</li><li>Settings → <b>Linked devices</b></li><li>Tap <b>Link a device</b> and scan</li></ol></div>`;
-  if (st === 'connecting') return `<div class="head"><div><h2>WhatsApp</h2><p>Connecting…</p></div>${pill('warn', 'Connecting')}</div><div class="muted"><span class="spin"></span> Getting a QR code…</div>`;
+    <div class="row between"><span class="small muted">To stop instantly: unlink here, or on your phone in WhatsApp → Linked devices.</span><button class="btn danger sm" data-act="unlink" data-busy="Unlinking…">Unlink</button></div>`;
+  const showQr = st === 'qr' && w.qr;
   return `
-    <div class="head"><div><h2>Connect WhatsApp</h2><p>Scan a QR code — takes 20 seconds.</p></div>${pill('bad', st === 'logged_out' ? 'Unlinked' : 'Not connected')}</div>
-    <p class="muted small">Safe by default: until you change <a href="#/replies">Reply rules</a>, the AI only answers <b>you</b> (in "Message yourself" and with <code>/ai</code>).</p>
-    ${w.lastError && st !== 'logged_out' ? `<p class="small" style="color:var(--danger)">${esc(w.lastError)}</p>` : ''}
-    <button class="btn" data-act="connect" data-busy="Starting…">Connect WhatsApp</button>`;
+    <div class="linkbox">
+      <div>
+        <h2>Link your WhatsApp</h2>
+        <ol class="wsteps" style="font-size:15px">
+          <li><span>Open <b>WhatsApp</b> on your phone</span></li>
+          <li><span>Tap <b>Settings</b> (iPhone) or <b>⋮ Menu</b> (Android) → <b>Linked devices</b></span></li>
+          <li><span>Tap <b>Link a device</b> and point your phone at the QR code</span></li>
+        </ol>
+        <p class="small muted" style="margin-top:6px">Safe by default: until you change <a href="#/replies">Reply rules</a>, the AI only answers <b>you</b>.</p>
+        ${w.lastError && st !== 'logged_out' && !showQr ? `<p class="small" style="color:var(--danger)">${esc(w.lastError)}</p>` : ''}
+      </div>
+      <div class="qrframe">
+        ${showQr ? `<img src="${w.qr}" alt="WhatsApp QR code">` :
+          `<div class="qrph">${st === 'connecting' ? '<span class="pill warn"><span class="spin"></span> Getting QR code…</span>' : '<button class="btn" data-act="connect" data-busy="Starting…">Get QR code</button>'}</div>`}
+      </div>
+    </div>`;
 }
 
 function pollStatus() {
@@ -349,7 +409,7 @@ PAGES.replies = {
     return `
     <div class="pagehead"><div><h1>Reply rules</h1><p>Decide exactly who your AI talks to, when, and how.</p></div></div>
     <div data-live>
-    ${house ? card('Who it answers', '', '<div class="banner ok" style="margin:0"><div class="bi">🌐</div><div>This is the shared number: it answers <b>everyone</b> who messages it, except blocked numbers.</div></div>' + txt('block_list', 'Never reply to these numbers', '+234 815 545 4251', 'Comma separated, with country code.')) :
+    ${house ? card('Who it answers', '', '<div class="banner ok" style="margin:0"><div class="bi">🌐</div><div>This is the shared number: it answers <b>everyone</b> who messages it, except blocked numbers.</div></div>' + chips('block_list', 'Never reply to these numbers', 'With country code. Always wins over everything else.')) :
     card('Who can talk to your AI', 'Messages from other people in private chats.', `
       ${cards('reply_mode', [
         ['me', 'Only me', 'The AI answers only you — in "Message yourself" and when you type the trigger word. Safest.', '🔒'],
@@ -357,8 +417,8 @@ PAGES.replies = {
         ['everyone', 'Everyone', 'Answers anyone who messages you, including strangers. Good for a business line.', '🌐'],
       ])}
       ${op.reply_mode === 'everyone' ? '<div class="banner warn" style="margin-top:14px"><div class="bi">⚠️</div><div>Strangers and spammers will get AI replies <b>as you</b>. Add a label (Style below) and block numbers you don\'t want answered.</div></div>' : ''}
-      ${op.reply_mode === 'allow' ? '<div style="margin-top:14px">' + area('allow_list', 'Numbers the AI may answer', '+1 718 555 1234, +972 50 123 4567', 'One per line or comma separated, with country code.') + '</div>' : ''}
-      <div style="margin-top:14px">${txt('block_list', 'Never reply to these numbers', '+234 815 545 4251', 'Always wins over everything else.')}</div>`)}
+      ${op.reply_mode === 'allow' ? '<div style="margin-top:16px">' + chips('allow_list', 'Numbers the AI may answer', 'Type a number with country code and press + Add.') + '</div>' : ''}
+      <div style="margin-top:16px">${chips('block_list', 'Never reply to these numbers', 'Always wins over everything else — spam, scammers, family you don\'t want answered.', '+234 815 545 4251')}</div>`)}
 
     ${!house ? card('Your own use', 'How you talk to your AI.', `
       ${sw('self_chat', 'Answer me in "Message yourself"', 'Your private chat with the AI — text or voice notes.')}
@@ -374,9 +434,15 @@ PAGES.replies = {
       ${op.group_mode === 'selected' ? groupPicker() : ''}`)}
 
     ${card('Hand-off to you', 'Let the AI step back when you take over.', `
-      ${sw('pause_on_manual', 'Pause the AI when I reply myself', 'If you type in a chat, the AI goes quiet in that chat for a while.')}
-      ${op.pause_on_manual ? num('pause_minutes', 'Pause for (minutes)', 1, 10080) : ''}
+      ${sw('pause_on_manual', "Don't reply once I reply", 'When you type in a chat yourself, the AI stops answering there.')}
+      ${op.pause_on_manual ? `<div class="field" style="max-width:320px;margin-top:8px"><label class="lbl">Stay quiet for</label>
+        <select data-special="handoff">${[['30', '30 minutes'], ['60', '1 hour'], ['240', '4 hours'], ['1440', '24 hours'], ['forever', 'Until I turn it back on']].map(([v, l]) => `<option value="${v}" ${(op.pause_forever ? 'forever' : String(op.pause_minutes)) === v ? 'selected' : ''}>${l}</option>`).join('')}${!op.pause_forever && ![30, 60, 240, 1440].includes(op.pause_minutes) ? `<option value="${op.pause_minutes}" selected>${op.pause_minutes} minutes</option>` : ''}</select></div>` : ''}
+      ${sw('reply_once', 'Reply only once per person', 'The AI answers the first message (like a smart greeting), then leaves the chat to you.')}
       <p class="small muted" style="margin:6px 0 0">Anyone can also send <code>/stop</code> to silence the AI in their chat and <code>/start</code> to bring it back. You can pause chats in <a href="#/chats">Conversations</a>.</p>`)}
+
+    ${card('Chat context', 'Let the AI read the recent messages of the chat — including what you typed yourself — so its replies fit the conversation.', `
+      <div class="row between"><span class="small muted">Messages to read before replying</span>${seg('context_messages', [['0', 'Off'], ['5', '5'], ['10', '10'], ['20', '20']])}</div>
+      <p class="hint" style="margin-top:10px">Read from memory only while the server is running; nothing extra is saved to disk.</p>`)}
 
     ${card('Quick replies', 'Fixed answers for keywords — instant, no AI. Great for prices, links, addresses.', `
       <div class="rep">${(op.keyword_rules || []).map((r, i) => `
@@ -531,7 +597,7 @@ const permSeg = (k, opts = ['off', 'me', 'anyone']) => seg(k, opts.map((v) => [v
 PAGES.actions = {
   render() {
     const op = o(); const sec = S.settings.secrets;
-    const emailReady = op.smtp_host && op.smtp_user && sec.smtp_pass;
+    const emailReady = S.mail?.canSend ?? (op.smtp_host && op.smtp_user && sec.smtp_pass);
     const callReady = op.twilio_sid && op.twilio_from && sec.twilio_token;
     const ready = (r) => (r ? pill('ok', 'Ready') : pill('warn', 'Needs setup'));
     const actionCard = (ico, title, desc, k, opts, status, body = '') => `
@@ -543,15 +609,9 @@ PAGES.actions = {
     <div data-live>
     ${card('Safety', '', sw('confirm_actions', 'Ask me "yes / no" before sending emails, calls or WhatsApp messages', 'The AI shows exactly what it will send and waits for your OK. Strongly recommended.'))}
 
-    ${actionCard('📧', 'Email', 'Send emails from your own address.', 'act_email', ['off', 'me', 'anyone'], ready(emailReady), `
-      <details style="margin-top:12px" ${emailReady ? '' : 'open'}><summary>Email account (SMTP)</summary>
-        <p class="small muted">Gmail: host <code>smtp.gmail.com</code>, port 587, your Gmail address, and an <b>App Password</b> (Google Account → Security → App passwords). Outlook: <code>smtp.office365.com</code>.</p>
-        <div class="grid2">${txt('smtp_host', 'SMTP server', 'smtp.gmail.com')}${num('smtp_port', 'Port', 1, 65535)}</div>
-        <div class="grid2">${txt('smtp_user', 'Username / email', 'you@gmail.com')}${secret('smtp_pass', 'Password / app password', '')}</div>
-        ${txt('smtp_from', 'Send as (optional)', 'Yisroel Gordon <you@gmail.com>')}
-        ${sw('smtp_secure', 'Use SSL (port 465)')}
-        <div class="row" style="margin-top:8px"><input id="testEmail" type="email" placeholder="Send a test to…" style="max-width:280px"><button class="btn ghost sm" data-act="testConn" data-kind="email" data-busy="Sending…">Send test</button></div>
-      </details>`)}
+    ${card('🎯 Command numbers', 'Messages from these numbers are treated as <b>you</b>: they can ask the AI to email, call, set reminders, send WhatsApps — anything you can. Use it for your second phone, your office line or a trusted assistant.', chips('owner_numbers', 'Command numbers', 'Only add numbers you fully trust. Risky actions still ask "yes / no" first.'))}
+
+    ${actionCard('📧', 'Email', 'Send emails — from your own mailbox or the bot\'s own address.', 'act_email', ['off', 'me', 'anyone'], ready(emailReady), `<p class="small muted" style="margin:12px 0 0">Set up sending, the bot's inbox and its own address on the <a href="#/email">Bot email</a> page.</p>`)}
 
     ${actionCard('📞', 'Phone calls', 'The AI calls a number and speaks your message.', 'act_call', ['off', 'me', 'anyone'], ready(callReady), `
       <details style="margin-top:12px" ${callReady ? '' : 'open'}><summary>Calling provider</summary>
@@ -577,7 +637,10 @@ PAGES.actions = {
       </details>`)}
     </div>`;
   },
-  async after() { loadReminders(); loadNotes(); },
+  async after() {
+    loadReminders(); loadNotes();
+    if (S.mail === undefined) { S.mail = await api('/api/email' + tq()).catch(() => null); if (S.page === 'actions') rerender(); }
+  },
   acts: {
     testConn: (b) => busy(b, async () => {
       if (S.dirty) { toast('Save your changes first', true); return; }
@@ -600,6 +663,78 @@ async function loadNotes() {
   const el = $('#noteList'); if (!el) return;
   el.innerHTML = r.length ? `<div class="tablewrap"><table><tr><th>Saved</th><th>From</th><th>Note</th><th></th></tr>${r.slice(0, 50).map((x) => `<tr><td class="small">${fmtDate(x.ts)}</td><td class="small">${esc(x.contact || '')}</td><td>${esc(x.text)}</td><td><button class="btn link small" data-act="delNote" data-id="${x.id}">Delete</button></td></tr>`).join('')}</table></div>` : '<div class="small muted">No notes yet.</div>';
 }
+
+// ---------- BOT EMAIL ----------
+PAGES.email = {
+  render() {
+    const op = o(); const m = S.mail;
+    if (!m) return `<div class="pagehead"><div><h1>Bot email</h1><p>Give your assistant an inbox.</p></div></div><div class="card muted">Loading…</div>`;
+    const imapPreset = (h) => `<button class="btn ghost sm" data-act="imapPreset" data-h="${h}">${h === 'imap.gmail.com' ? 'Gmail' : h === 'outlook.office365.com' ? 'Outlook / Microsoft 365' : 'Yahoo'}</button>`;
+    return `
+    <div class="pagehead"><div><h1>Bot email</h1><p>Your assistant gets an inbox: it tells you on WhatsApp when mail arrives, and reads or replies when you ask.</p></div></div>
+    <div class="banner ok"><div class="bi">💡</div><div>In WhatsApp: <i>"any new emails?"</i> · <i>"read email 12"</i> · <i>"reply to email 12: thanks, I'll call you tomorrow"</i> · <i>"email dan@acme.com the price list"</i></div></div>
+    <div data-live>
+    ${card('📮 The bot\'s own address', 'A dedicated address for your assistant, e.g. for customers or sign-ups.', !m.domain
+      ? `<div class="banner" style="margin:0"><div class="bi">🛠️</div><div>Not available yet — the server admin needs to add a mail domain${S.me.user.is_admin ? ' on the <a href="#/admin">Admin</a> page' : ''}. Meanwhile, connect any mailbox below.</div></div>`
+      : m.address
+        ? `<div class="row between"><div><div class="mailaddr">${esc(m.address)}</div><div class="small muted">${m.sendingVia === 'bot' ? 'Receives and sends.' : 'Receives mail. Sending uses your mailbox below if set up.'}</div></div><div class="row"><button class="btn ghost sm" data-act="copyAddr" data-v="${esc(m.address)}">Copy</button><button class="btn danger sm" data-act="releaseAddr">Remove</button></div></div>`
+        : `<div class="row"><input id="mailLocal" placeholder="yourname" style="max-width:220px" autocomplete="off"><span class="mailaddr">@${esc(m.domain)}</span><button class="btn" data-act="claimAddr" data-busy="Saving…">Get this address</button></div>`)}
+
+    ${card('📥 Connect a mailbox', 'Use any existing inbox (Gmail, Outlook, company mail). Checked every 2 minutes.', `
+      <div class="row" style="margin-bottom:12px">${imapPreset('imap.gmail.com')}${imapPreset('outlook.office365.com')}${imapPreset('imap.mail.yahoo.com')}</div>
+      <p class="small muted">Gmail: turn on 2-Step Verification, then create an <b>App Password</b> (Google Account → Security → App passwords) and paste it below — not your normal password.</p>
+      <div class="grid2">${txt('imap_host', 'IMAP server', 'imap.gmail.com')}${num('imap_port', 'Port', 1, 65535)}</div>
+      <div class="grid2">${txt('imap_user', 'Email address', 'you@gmail.com')}${secret('imap_pass', 'App password', '')}</div>
+      ${sw('mail_check', 'Check this inbox')}
+      ${sw('mail_notify', 'WhatsApp me when a new email arrives', 'Sent to your "Message yourself" chat with a short preview.')}
+      <div class="row" style="margin-top:10px"><button class="btn ghost sm" data-act="checkMail" data-busy="Checking…">Check now</button>
+        <span class="small ${m.error ? '' : 'muted'}" style="${m.error ? 'color:var(--danger)' : ''}">${m.error ? esc(m.error) : m.lastCheck ? 'Last checked ' + ago(m.lastCheck / 1000) : m.imap ? 'Not checked yet' : ''}</span></div>`)}
+
+    ${card('📤 Sending', 'How the assistant sends email. Your mailbox above usually works with the same app password.', `
+      <div class="row" style="margin-bottom:12px"><button class="btn ghost sm" data-act="smtpFromImap">Use same account as inbox</button></div>
+      <div class="grid2">${txt('smtp_host', 'SMTP server', 'smtp.gmail.com')}${num('smtp_port', 'Port', 1, 65535)}</div>
+      <div class="grid2">${txt('smtp_user', 'Username / email', 'you@gmail.com')}${secret('smtp_pass', 'Password / app password', '')}</div>
+      ${txt('smtp_from', 'Send as (optional)', 'Your Name <you@gmail.com>')}
+      ${sw('smtp_secure', 'Use SSL (port 465)')}
+      <div class="row" style="margin-top:8px"><input id="testEmail" type="email" placeholder="Send a test to…" style="max-width:280px"><button class="btn ghost sm" data-act="testConn" data-kind="email" data-busy="Sending…">Send test</button></div>
+      <div class="divider"></div>
+      <div class="row between"><span><b>AI can read & reply to emails</b><div class="small muted">Only for you (and your command numbers). Replies ask "yes / no" first.</div></span>${seg('act_email_read', [['off', 'Off'], ['me', 'Only me']])}</div>`)}
+    </div>
+    ${card('Inbox', `${m.emails.length} recent`, m.emails.length ? m.emails.map((e) => `
+      <div class="emailRow" data-act="openMail" data-id="${e.id}"><div style="min-width:0"><div><b>${esc(e.from_name || e.from_addr)}</b> <span class="small faint">#${e.id}</span></div><div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.subject)}</div><div class="small muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.snippet)}</div><div id="mail-${e.id}" class="hidden"></div></div><div class="small faint">${ago(e.date)}</div></div>`).join('') : empty('📭', 'No emails yet.'))}`;
+  },
+  async after() {
+    if (S.mail === undefined) { S.mail = await api('/api/email' + tq()).catch((e) => ({ emails: [], error: e.message })); if (S.page === 'email') rerender(); }
+  },
+  acts: {
+    imapPreset: (b) => { o().imap_host = b.dataset.h; o().imap_port = 993; o().imap_secure = true; markDirty(true); rerender(); },
+    smtpFromImap: () => {
+      const h = o().imap_host || '';
+      o().smtp_host = h.includes('gmail') ? 'smtp.gmail.com' : h.includes('office365') ? 'smtp.office365.com' : h.includes('yahoo') ? 'smtp.mail.yahoo.com' : h.replace(/^imap\./, 'smtp.');
+      o().smtp_port = 587; o().smtp_secure = false; o().smtp_user = o().imap_user;
+      if (S.secretsDraft.imap_pass) S.secretsDraft.smtp_pass = S.secretsDraft.imap_pass;
+      markDirty(true); rerender();
+      if (!S.secretsDraft.smtp_pass && !S.settings.secrets.smtp_pass) toast('Now paste the same app password in the sending password field');
+    },
+    claimAddr: (b) => busy(b, async () => { S.mail = { ...S.mail, ...(await api('/api/email/claim' + tq(), { body: { local: $('#mailLocal').value } })) }; toast('Address saved ✓'); rerender(); }),
+    releaseAddr: async () => { if (!confirm('Remove this address? Mail sent to it will bounce.')) return; S.mail = { ...S.mail, ...(await api('/api/email/release' + tq(), { body: {} })) }; rerender(); },
+    copyAddr: async (b) => { try { await navigator.clipboard.writeText(b.dataset.v); toast('Copied'); } catch (_) { toast(b.dataset.v); } },
+    checkMail: (b) => busy(b, async () => {
+      if (S.dirty) throw new Error('Save your changes first');
+      const r = await api('/api/email/check' + tq(), { body: {} });
+      toast(`Inbox checked — ${r.added} new`);
+      S.mail = await api('/api/email' + tq()); rerender();
+    }),
+    openMail: async (b) => {
+      const box = $(`#mail-${b.dataset.id}`); if (!box) return;
+      if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
+      const m = await api(`/api/email/${b.dataset.id}${tq()}`);
+      box.innerHTML = `<pre style="white-space:pre-wrap;margin:10px 0 0;font:inherit;font-size:13.5px;max-height:320px;overflow:auto">${esc(m.text.slice(0, 20000))}</pre>`;
+      box.classList.remove('hidden');
+    },
+    testConn: (...a) => PAGES.actions.acts.testConn(...a),
+  },
+};
 
 // ---------- VOICE ----------
 PAGES.voice = {
@@ -655,33 +790,64 @@ const PRESETS = [
   ['openai', 'OpenAI', 'https://api.openai.com/v1', 'gpt-4o-mini'],
   ['custom', 'Other OpenAI-compatible API', '', ''],
 ];
+const OR_BASE = 'https://openrouter.ai/api/v1';
+const OR_MODELS = [
+  ['openai/gpt-4o-mini', 'ChatGPT · GPT-4o mini', 'Fast, cheap, great for most chats'],
+  ['openai/gpt-4o', 'ChatGPT · GPT-4o', 'Smarter answers, costs more'],
+  ['anthropic/claude-3.5-haiku', 'Claude Haiku', 'Fast and friendly'],
+  ['anthropic/claude-sonnet-4', 'Claude Sonnet', 'Top writing and reasoning'],
+  ['meta-llama/llama-3.3-70b-instruct', 'Llama 3.3 70B', 'Open source'],
+  ['qwen/qwen-2.5-72b-instruct', 'Qwen 2.5 72B', 'Open source, many languages'],
+  ['deepseek/deepseek-chat', 'DeepSeek', 'Open source, very cheap'],
+];
 PAGES.model = {
   render() {
     const op = o();
-    if (!S.me.allowCustomAi) return `<div class="pagehead"><div><h1>AI model</h1></div></div>${card('Server AI', '', '<p class="muted">Your account uses the server\'s AI model, chosen by the admin.</p>')}`;
+    if (!S.me.allowCustomAi) return `<div class="pagehead"><div><h1>AI model</h1><p>The brain behind your assistant.</p></div></div>${card('Server AI', '', '<p class="muted">Your account uses the server\'s AI model, chosen by the admin.</p>')}`;
+    const onOR = op.ai_mode === 'custom' && op.ai_base_url === OR_BASE && (S.settings.secrets.ai_key || S.secretsDraft.ai_key);
+    const known = OR_MODELS.some(([id]) => id === op.ai_model);
     return `
-    <div class="pagehead"><div><h1>AI model</h1><p>Choose the brain behind your assistant.</p></div></div>
+    <div class="pagehead"><div><h1>AI model</h1><p>The brain behind your assistant.</p></div></div>
     <div data-live>
-    ${card('Which AI', '', cards('ai_mode', [
-      ['server', 'Server AI (default)', 'Runs on this server, set by the admin. Free and private, but small models are less smart.', '🖥️'],
-      ['custom', 'My own AI provider', 'Plug in an API key for a stronger model — open-source (Llama, Qwen, DeepSeek) or any OpenAI-compatible service.', '🔑'],
+    ${onOR ? card('Smarter AI', 'Connected through OpenRouter. Pick the model you like — you can switch anytime.', `
+        <div class="row between" style="margin-bottom:14px">${pill('ok', 'Signed in')}<div class="row"><button class="btn ghost sm" data-act="orSignin" data-busy="Opening…">Sign in again</button><button class="btn danger sm" data-act="orOff">Use server AI instead</button></div></div>
+        ${cards('ai_model', OR_MODELS.map(([id, t, d]) => [id, t, d]).concat(known ? [] : [[op.ai_model, op.ai_model || 'Other model', 'Your custom choice']]))}
+        <details style="margin-top:12px"><summary>Use another model</summary>${txt('ai_model', 'Model id', 'provider/model-name', 'Any model listed on openrouter.ai/models')}</details>`)
+      : card('', '', `
+        <div class="signin"><div class="big">✨</div><div class="grow"><h2 style="font-size:18px">Make your assistant much smarter — one click</h2>
+          <p class="muted" style="margin:4px 0 0">Sign in with Google or email and choose ChatGPT, Claude, Llama and more. No API keys to copy. Pay only for what you use on your OpenRouter account.</p></div>
+          <button class="btn lg" data-act="orSignin" data-busy="Opening…">Sign in & connect</button></div>
+        <p class="small faint" style="margin:12px 0 0">Your assistant can't use a personal ChatGPT or Claude chat subscription — those services don't allow it — so this connects through OpenRouter instead.</p>`)}
+
+    ${card('Which AI answers', '', cards('ai_mode', [
+      ['server', 'Server AI (free)', 'Open-source model running on this server. Private, but less smart.', '🖥️'],
+      ['custom', 'My connected AI', 'The smarter model you signed in to (or your own API key below).', '🔑'],
     ]))}
-    ${op.ai_mode === 'custom' ? card('Your provider', 'Your key is encrypted on the server and never shown again.', `
+
+    <details class="card"><summary>Advanced: use your own API key</summary>
+      <p class="small muted">Any OpenAI-compatible service: Groq, Together, DeepSeek, OpenAI, a self-hosted vLLM…</p>
       <div class="field"><label class="lbl">Quick setup</label><select id="preset"><option value="">Choose a provider…</option>${PRESETS.map(([id, l]) => `<option value="${id}">${esc(l)}</option>`).join('')}</select></div>
       ${txt('ai_base_url', 'API base URL', 'https://api.groq.com/openai/v1')}
       <div class="field"><label class="lbl">Model</label><input data-opt="ai_model" list="modelList" value="${esc(op.ai_model)}" placeholder="llama-3.3-70b-versatile"><datalist id="modelList"></datalist></div>
-      ${secret('ai_key', 'API key', 'sk-…')}`) : ''}
-    ${card('Test connection', 'Saves nothing — just checks it works.', `<button class="btn ghost" data-act="testAi" data-busy="Testing…">Test now</button><div id="aiOut" style="margin-top:12px"></div>`)}
+      ${secret('ai_key', 'API key', 'sk-…')}
+    </details>
+    ${card('Test it', 'Checks the AI you selected above (save first).', `<button class="btn ghost" data-act="testAi" data-busy="Testing…">Test now</button><div id="aiOut" style="margin-top:12px"></div>`)}
     </div>`;
   },
   after() {
     $('#preset')?.addEventListener('change', (e) => {
       const p = PRESETS.find((x) => x[0] === e.target.value); if (!p) return;
       if (p[2]) o().ai_base_url = p[2]; if (p[3]) o().ai_model = p[3];
-      markDirty(true); rerender();
+      o().ai_mode = 'custom'; markDirty(true); rerender();
     });
   },
   acts: {
+    orSignin: (b) => busy(b, async () => {
+      if (S.dirty) throw new Error('Save or discard your changes first');
+      const r = await api('/api/ai/openrouter/start' + tq());
+      location.href = r.url;
+    }),
+    orOff: () => { o().ai_mode = 'server'; markDirty(true); rerender(); },
     testAi: (b) => busy(b, async () => {
       const op = o();
       const r = await api('/api/ai/test' + tq(), { body: { mode: op.ai_mode, base_url: op.ai_base_url, model: op.ai_model, api_key: S.secretsDraft.ai_key ?? S.settings.secrets.ai_key } });
@@ -800,6 +966,7 @@ PAGES.admin = {
       <details style="margin-top:14px"><summary>+ Create a user</summary>
         <div class="grid3"><div class="field"><label class="lbl">Name</label><input id="nuName"></div><div class="field"><label class="lbl">Email</label><input id="nuEmail" type="email"></div><div class="field"><label class="lbl">Temporary password</label><input id="nuPass" type="text" minlength="8"></div></div>
         <button class="btn sm" data-act="newUser" data-busy="Creating…">Create user</button></details>`)}
+    ${card('Bot email domain', 'Lets every user claim an address like name@yourdomain for their assistant.', '<div id="aMail" class="muted">Loading…</div>')}
     ${card('Speech API (optional)', 'Used by "Speech API" voice mode for people without their own provider. Any OpenAI-compatible /audio endpoint (e.g. Groq).', '<div id="aVoice" class="muted">Loading…</div>')}`;
   },
   async after() { await loadAdmin(); },
@@ -846,6 +1013,20 @@ async function loadAdmin() {
     <div class="grid3"><div class="field"><label class="lbl">Base URL</label><input data-admin="voice_api_base" value="${esc(a.voice_api_base)}" placeholder="https://api.groq.com/openai/v1"></div>
     <div class="field"><label class="lbl">Model</label><input data-admin="voice_api_model" value="${esc(a.voice_api_model)}" placeholder="whisper-large-v3-turbo"></div>
     <div class="field"><label class="lbl">API key</label><input type="password" data-admin="voice_api_key" value="${esc(a.voice_api_key)}" autocomplete="new-password"></div></div>
+    <button class="btn sm" data-act="saveAdmin" data-busy="Saving…">Save</button>`;
+  $('#aMail').innerHTML = `
+    <div class="grid2"><div class="field"><label class="lbl">Mail domain</label><input data-admin="mail_domain" value="${esc(a.mail_domain)}" placeholder="bots.airbiz.ai"><div class="hint">A domain or subdomain you control, used only for bot addresses.</div></div>
+    <div class="field"><label class="lbl">Incoming mail webhook</label><input readonly value="${esc(a.inbound_url)}"><div class="hint">Header <code>X-Inbound-Secret: ${esc(a.inbound_secret)}</code></div></div></div>
+    <details><summary>How to receive mail (free with Cloudflare)</summary>
+      <ol class="small" style="margin:0;padding-left:18px">
+        <li><span>Add the domain to Cloudflare → <b>Email → Email Routing</b> → enable it (it adds the MX records).</span></li>
+        <li><span>Create an <b>Email Worker</b> that forwards each message to the webhook above with the secret header (copy-paste code in the README).</span></li>
+        <li><span>Routing rules → <b>Catch-all</b> → Send to Worker.</span></li>
+      </ol></details>
+    <div class="divider"></div>
+    <label class="lbl">Sending from bot addresses (SMTP for the domain — e.g. Resend, Mailgun, Brevo, SES)</label>
+    <div class="grid2"><div class="field"><label class="lbl small">SMTP server</label><input data-admin="bot_smtp_host" value="${esc(a.bot_smtp_host)}" placeholder="smtp.resend.com"></div><div class="field"><label class="lbl small">Port</label><input data-admin="bot_smtp_port" value="${esc(a.bot_smtp_port)}" placeholder="587"></div></div>
+    <div class="grid2"><div class="field"><label class="lbl small">Username</label><input data-admin="bot_smtp_user" value="${esc(a.bot_smtp_user)}"></div><div class="field"><label class="lbl small">Password / API key</label><input type="password" data-admin="bot_smtp_pass" value="${esc(a.bot_smtp_pass)}" autocomplete="new-password"></div></div>
     <button class="btn sm" data-act="saveAdmin" data-busy="Saving…">Save</button>`;
   $('#aUsers').innerHTML = `<div class="tablewrap"><table><tr><th>User</th><th>WhatsApp</th><th>Joined</th><th></th></tr>${s.userList.map((u) => `
     <tr><td><b>${esc(u.name || '—')}</b> ${u.is_admin ? '<span class="tag">admin</span>' : ''}<div class="small faint">${esc(u.email)}</div></td>
