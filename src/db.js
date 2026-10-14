@@ -37,7 +37,36 @@ CREATE TABLE IF NOT EXISTS messages (
   ts INTEGER DEFAULT (strftime('%s','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_msg_chat ON messages(session_id, chat_jid, id);
+CREATE TABLE IF NOT EXISTS muted_chats (
+  session_id TEXT NOT NULL,
+  chat_jid TEXT NOT NULL,
+  PRIMARY KEY (session_id, chat_jid)
+);
 `);
+try { db.exec('ALTER TABLE settings ADD COLUMN options TEXT'); } catch (_) { /* already there */ }
+
+// Every per-number option with its default. Shown in the dashboard and enforced in agent.js.
+const DEFAULT_OPTIONS = {
+  self_chat: true,          // answer in the owner's "Message yourself" chat
+  ai_trigger: true,         // owner can type "/ai ..." in any chat
+  trigger_word: '/ai',
+  allow_list: '',           // if set, ONLY reply to these numbers
+  block_list: '',           // never reply to these numbers
+  prefix_on: true,          // start auto-replies with a label
+  prefix_text: '🤖',
+  use_emojis: true,         // let the AI use emojis
+  quote_reply: true,        // reply as a quote of the incoming message
+  typing: true,             // show "typing..."
+  reply_delay: 0,           // extra seconds to wait before replying
+  memory: true,             // remember the conversation
+  reply_length: 'short',    // short | medium | long
+  language: '',             // empty = same language as the sender
+  quiet_enabled: false,     // don't reply during quiet hours
+  quiet_start: '22:00',
+  quiet_end: '08:00',
+  timezone: 'America/New_York',
+  away_message: '',         // optional one-time message during quiet hours
+};
 
 const q = {
   userByEmail: db.prepare('SELECT * FROM users WHERE email = ?'),
@@ -49,9 +78,12 @@ const q = {
   deleteToken: db.prepare('DELETE FROM auth_tokens WHERE token = ?'),
   listUsers: db.prepare('SELECT id, email, name, is_admin, created_at FROM users ORDER BY id DESC'),
   getSettings: db.prepare('SELECT * FROM settings WHERE session_id = ?'),
-  upsertSettings: db.prepare(`INSERT INTO settings (session_id, persona, auto_reply, reply_groups, enabled)
-    VALUES (@session_id, @persona, @auto_reply, @reply_groups, @enabled)
-    ON CONFLICT(session_id) DO UPDATE SET persona=@persona, auto_reply=@auto_reply, reply_groups=@reply_groups, enabled=@enabled`),
+  upsertSettings: db.prepare(`INSERT INTO settings (session_id, persona, auto_reply, reply_groups, enabled, options)
+    VALUES (@session_id, @persona, @auto_reply, @reply_groups, @enabled, @options)
+    ON CONFLICT(session_id) DO UPDATE SET persona=@persona, auto_reply=@auto_reply, reply_groups=@reply_groups, enabled=@enabled, options=@options`),
+  isMuted: db.prepare('SELECT 1 FROM muted_chats WHERE session_id = ? AND chat_jid = ?'),
+  mute: db.prepare('INSERT OR IGNORE INTO muted_chats (session_id, chat_jid) VALUES (?, ?)'),
+  unmute: db.prepare('DELETE FROM muted_chats WHERE session_id = ? AND chat_jid = ?'),
   addMsg: db.prepare('INSERT INTO messages (session_id, chat_jid, role, content) VALUES (?, ?, ?, ?)'),
   history: db.prepare('SELECT role, content FROM (SELECT id, role, content FROM messages WHERE session_id = ? AND chat_jid = ? ORDER BY id DESC LIMIT ?) ORDER BY id ASC'),
   clearChat: db.prepare('DELETE FROM messages WHERE session_id = ? AND chat_jid = ?'),
@@ -61,9 +93,26 @@ const q = {
 };
 
 function getSettings(sessionId) {
-  return q.getSettings.get(sessionId) || {
-    session_id: sessionId, persona: '', auto_reply: 0, reply_groups: 0, enabled: 1,
+  const row = q.getSettings.get(sessionId) || {
+    session_id: sessionId, persona: '', auto_reply: 0, reply_groups: 0, enabled: 1, options: null,
   };
+  let opts = {};
+  try { opts = JSON.parse(row.options || '{}'); } catch (_) {}
+  const defaults = { ...DEFAULT_OPTIONS, ...(sessionId === 'house' ? { prefix_on: false } : {}) };
+  return { ...row, options: { ...defaults, ...opts } };
 }
 
-module.exports = { db, q, getSettings };
+function cleanOptions(input = {}) {
+  const out = {};
+  for (const [k, def] of Object.entries(DEFAULT_OPTIONS)) {
+    if (!(k in input)) continue;
+    const v = input[k];
+    if (typeof def === 'boolean') out[k] = !!v;
+    else if (typeof def === 'number') out[k] = Math.max(0, Math.min(60, Number(v) || 0));
+    else out[k] = String(v ?? '').slice(0, 2000);
+  }
+  if (out.reply_length && !['short', 'medium', 'long'].includes(out.reply_length)) out.reply_length = 'short';
+  return out;
+}
+
+module.exports = { db, q, getSettings, cleanOptions, DEFAULT_OPTIONS };

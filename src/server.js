@@ -5,7 +5,7 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const bcrypt = require('bcryptjs');
 const config = require('./config');
-const { q, getSettings } = require('./db');
+const { q, getSettings, cleanOptions } = require('./db');
 const ai = require('./ai');
 const wa = require('./wa');
 
@@ -96,12 +96,14 @@ app.get('/api/settings', auth, (req, res) => res.json(getSettings(sessionFor(req
 app.post('/api/settings', auth, (req, res) => {
   const id = sessionFor(req).id;
   const b = req.body || {};
+  const current = getSettings(id);
   q.upsertSettings.run({
     session_id: id,
-    persona: String(b.persona || '').slice(0, 2000),
-    auto_reply: b.auto_reply ? 1 : 0,
-    reply_groups: b.reply_groups ? 1 : 0,
+    persona: String(b.persona ?? current.persona ?? '').slice(0, 2000),
+    auto_reply: (b.auto_reply ?? current.auto_reply) ? 1 : 0,
+    reply_groups: (b.reply_groups ?? current.reply_groups) ? 1 : 0,
     enabled: b.enabled === false ? 0 : 1,
+    options: JSON.stringify({ ...current.options, ...cleanOptions(b.options) }),
   });
   res.json(getSettings(id));
 });
