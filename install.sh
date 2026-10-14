@@ -47,6 +47,8 @@ fi
 
 if command -v ufw >/dev/null && ufw status | grep -q active; then
   ufw allow 8080/tcp >/dev/null
+  ufw allow 80/tcp >/dev/null
+  ufw allow 443/tcp >/dev/null
 fi
 
 say "Building and starting (first run downloads the AI model — a few minutes)"
@@ -55,6 +57,7 @@ docker compose up -d
 IP=$(curl -fsS -4 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 say "Done!"
 echo "  Dashboard:        http://${IP}:8080"
+echo "  Secure (HTTPS):   https://${IP//./-}.sslip.io"
 echo "  Uptime monitor:   ssh -L 3001:localhost:3001 root@${IP}  then open http://localhost:3001"
 echo "  Model download:   docker compose logs -f ollama-pull"
 echo "  App logs:         docker compose logs -f app"
