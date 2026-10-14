@@ -1,6 +1,6 @@
 {
   "name": "air-whatsapp-agent",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Everyone's AI agent on WhatsApp: knowledge base, voice notes, actions (email, calls, reminders). Open-source AI by default.",
   "main": "src/server.js",
   "private": true,
@@ -21,6 +21,8 @@
     "cookie-parser": "1.4.7",
     "express": "5.3.0",
     "ffmpeg-static": "5.2.0",
+    "imapflow": "1.0.191",
+    "mailparser": "3.7.2",
     "mammoth": "1.8.0",
     "multer": "2.0.2",
     "nodemailer": "6.9.16",

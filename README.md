@@ -16,8 +16,11 @@ and gets things done. Open-source AI by default, runs on your own server.
 - **Actions** — just ask in WhatsApp: send emails (your SMTP/Gmail), place phone calls that speak a message
   (Twilio for now), send WhatsApp messages, set reminders, save notes/leads, notify you when someone needs
   a person, and trigger webhooks (Zapier, Make, n8n, CRM). Risky actions ask "yes / no" first.
-- **Bring your own AI** — server model by default (Ollama), or each user can plug in any OpenAI-compatible
-  provider (Groq, OpenRouter, Together, DeepSeek, OpenAI, self-hosted vLLM…).
+- **Smarter AI in one click** — server model by default (Ollama), or *Sign in & connect* through OpenRouter
+  (ChatGPT, Claude, Llama, Qwen, DeepSeek) with no API keys to copy. Any OpenAI-compatible key also works.
+- **Bot email** — connect any mailbox (IMAP) or claim `name@yourdomain`; WhatsApp alerts for new mail, and the AI can read and reply.
+- **Command numbers** — your other phones or trusted people can command the AI as if they were you.
+- **Chat context** — reads the last messages of the chat (in memory only) so replies fit the conversation.
 - **Conversations** — see what the AI answered, pause it per chat, clear its memory.
 - **Test your AI** — a playground that uses your real prompts and knowledge, with actions simulated.
 - **Admin** — create users (public sign-up is off by default), server AI model, download local models,
@@ -61,6 +64,30 @@ apt install -y caddy
 echo 'agent.yourdomain.com { reverse_proxy localhost:8080 }' > /etc/caddy/Caddyfile
 systemctl reload caddy
 ```
+
+## Bot email addresses (optional)
+
+Users can connect any mailbox over IMAP without this. To also give every assistant its own
+`name@yourdomain` address:
+
+1. Admin page → **Bot email domain**: enter a domain you control (e.g. `bots.yourdomain.com`), copy the webhook URL and secret.
+2. Cloudflare → Email → **Email Routing** for that domain → create an **Email Worker**:
+
+```js
+export default {
+  async email(message, env) {
+    const raw = await new Response(message.raw).text();
+    await fetch(env.WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Inbound-Secret': env.SECRET },
+      body: JSON.stringify({ to: message.to, raw }),
+    });
+  },
+};
+```
+
+   Set `WEBHOOK_URL` and `SECRET` as Worker variables, then add a **catch-all** routing rule → this Worker.
+3. For sending from those addresses, add SMTP for the domain (Resend, Mailgun, Brevo, SES…) on the same Admin card.
 
 ## Notes
 

@@ -27,7 +27,6 @@ services:
       - COOKIE_SECURE=${COOKIE_SECURE:-auto}
       - WHISPER_MODEL=${WHISPER_MODEL:-onnx-community/whisper-base}
       - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-15}
-      - DEPLOY_SHA=${DEPLOY_SHA:-initial}
       - OLLAMA_URL=http://ollama:11434
       - DATA_DIR=/data
       - PORT=3000
