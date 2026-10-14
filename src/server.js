@@ -336,13 +336,19 @@ app.post('/api/inbound/email', wrap(async (req, res) => {
 }));
 
 // ---------- one-click AI sign-in (OpenRouter OAuth, PKCE) ----------
-const oauthPending = new Map(); // nonce -> { sessionId, verifier, at }
-app.get('/api/ai/openrouter/start', auth, (req, res) => {
+// Works two ways: click "Sign in" on this device, or scan the QR code and sign in on your phone.
+// The callback is bound to the one-time state nonce (not the browser cookie), so a phone that
+// isn't logged in to the dashboard can finish the sign-in; the dashboard polls /status.
+const QRCode = require('qrcode');
+const oauthPending = new Map(); // nonce -> { sessionId, userId, verifier, at }
+const oauthDone = new Map();    // nonce -> { userId, ok, at }
+app.get('/api/ai/openrouter/start', auth, wrap(async (req, res) => {
   if (getApp('allow_custom_ai') !== '1') return res.status(403).json({ error: 'The admin has disabled custom AI providers' });
   const verifier = crypto.randomBytes(48).toString('base64url');
   const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
   const nonce = crypto.randomBytes(16).toString('hex');
   for (const [k, v] of oauthPending) if (Date.now() - v.at > 15 * 60_000) oauthPending.delete(k);
+  for (const [k, v] of oauthDone) if (Date.now() - v.at > 15 * 60_000) oauthDone.delete(k);
   oauthPending.set(nonce, { sessionId: sid(req), userId: req.user.id, verifier, at: Date.now() });
   let host = '';
   try { host = new URL(`${req.protocol}://${req.get('host')}`).hostname.toLowerCase(); } catch {}
@@ -358,14 +364,29 @@ app.get('/api/ai/openrouter/start', auth, (req, res) => {
   authUrl.searchParams.set('code_challenge', challenge);
   authUrl.searchParams.set('code_challenge_method', 'S256');
   authUrl.searchParams.set('key_label', 'Air Agent');
-  res.json({ url: authUrl.toString() });
+  const qr = await QRCode.toDataURL(authUrl.toString(), { margin: 1, width: 300, errorCorrectionLevel: 'L' });
+  res.json({ url: authUrl.toString(), qr, state: nonce });
+}));
+app.get('/api/ai/openrouter/status', auth, (req, res) => {
+  const state = String(req.query.state || '');
+  const d = oauthDone.get(state);
+  if (d && d.userId === req.user.id) return res.json({ done: true, ok: d.ok });
+  const p = oauthPending.get(state);
+  res.json({ done: false, expired: !p || p.userId !== req.user.id });
 });
-app.get('/ai/openrouter/callback', auth, async (req, res) => {
+app.get('/ai/openrouter/callback', async (req, res) => {
   const state = String(req.query.state || '');
   const p = oauthPending.get(state);
   oauthPending.delete(state);
-  const back = (msg) => res.redirect(`/#/model?${msg}`);
-  if (!p || p.userId !== req.user.id || p.sessionId !== sid(req) || !req.query.code) return back('signin=failed');
+  const user = req.cookies.token && q.userByToken.get(req.cookies.token);
+  const sameBrowser = !!(p && user && user.id === p.userId);
+  const page = (ok) => res.type('html').send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Air Agent</title>
+<body style="font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;text-align:center;padding:16px">
+<div><div style="font-size:56px">${ok ? '✅' : '⚠️'}</div><h2>${ok ? 'Connected to OpenRouter' : 'Sign-in failed'}</h2>
+<p style="color:#555">${ok ? 'Your assistant is now using your OpenRouter account. You can close this page.' : 'Please go back to the dashboard and try again.'}</p></div></body>`);
+  const back = (msg) => (sameBrowser ? res.redirect(`/#/model?${msg}`) : page(msg === 'signin=ok'));
+  if (!p || !req.query.code) return back('signin=failed');
+  const finish = (ok) => oauthDone.set(state, { userId: p.userId, ok, at: Date.now() });
   try {
     const r = await fetch('https://openrouter.ai/api/v1/auth/keys', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -380,9 +401,11 @@ app.get('/ai/openrouter/callback', auth, async (req, res) => {
       secrets: { ai_key: d.key },
     });
     logEvent(p.sessionId, 'info', null, 'Signed in to OpenRouter — smarter AI connected');
+    finish(true);
     back('signin=ok');
   } catch (e) {
     console.error('OpenRouter sign-in failed:', e.message);
+    finish(false);
     back('signin=failed');
   }
 });
