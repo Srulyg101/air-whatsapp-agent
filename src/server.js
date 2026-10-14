@@ -344,7 +344,8 @@ app.get('/api/ai/openrouter/start', auth, (req, res) => {
   const nonce = crypto.randomBytes(16).toString('hex');
   for (const [k, v] of oauthPending) if (Date.now() - v.at > 15 * 60_000) oauthPending.delete(k);
   oauthPending.set(nonce, { sessionId: sid(req), userId: req.user.id, verifier, at: Date.now() });
-  const host = String(req.get('host') || '').split(':')[0].replace(/^\\[|\\]$/g, '');
+  let host = '';
+  try { host = new URL(`${req.protocol}://${req.get('host')}`).hostname.toLowerCase(); } catch {}
   const isLoopback = ['localhost', '127.0.0.1', '::1'].includes(host);
   if (req.protocol !== 'https' && !isLoopback) {
     oauthPending.delete(nonce);
@@ -364,7 +365,7 @@ app.get('/ai/openrouter/callback', auth, async (req, res) => {
   const p = oauthPending.get(state);
   oauthPending.delete(state);
   const back = (msg) => res.redirect(`/#/model?${msg}`);
-  if (!p || p.userId !== req.user.id || !req.query.code) return back('signin=failed');
+  if (!p || p.userId !== req.user.id || p.sessionId !== sid(req) || !req.query.code) return back('signin=failed');
   try {
     const r = await fetch('https://openrouter.ai/api/v1/auth/keys', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
