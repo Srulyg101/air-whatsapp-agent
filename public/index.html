@@ -34,6 +34,8 @@
   table { width:100%; border-collapse:collapse; font-size:14px; } td,th { text-align:left; padding:6px 4px; border-bottom:1px solid var(--line); }
   .stat { font-size:26px; font-weight:700; } .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; }
   .hidden { display:none !important; }
+  select { width:100%; padding:11px 12px; border-radius:10px; border:1px solid var(--line); background:#0b141a; color:var(--text); font:inherit; margin:6px 0 12px; }
+  h3.sub { font-size:15px; margin:14px 0 6px; color:var(--green); }
   ol { padding-left:20px; } a { color:var(--green); }
 </style>
 </head>
@@ -102,11 +104,55 @@
           <label class="muted">Personality / instructions (optional)</label>
           <textarea id="persona" placeholder="e.g. You work for my bakery. Opening hours are 7am–5pm Sun–Thu…"></textarea>
           <label class="toggle"><input type="checkbox" id="enabled"> Agent on</label>
-          <label class="toggle" id="autoWrap"><input type="checkbox" id="auto_reply"> Auto-reply to people who message me (replies start with 🤖)</label>
-          <label class="toggle"><input type="checkbox" id="reply_groups"> Reply in groups when @mentioned</label>
           <div class="row" style="margin-top:10px"><button onclick="saveSettings()">Save</button><span class="muted" id="saved"></span></div>
         </div>
       </div>
+
+      <div class="card">
+        <h2>Reply options</h2>
+        <div class="grid">
+          <div>
+            <h3 class="sub">Who it answers</h3>
+            <label class="toggle personal"><input type="checkbox" data-opt="self_chat"> Answer me in my "Message yourself" chat</label>
+            <label class="toggle personal"><input type="checkbox" id="auto_reply"> Auto-reply to people who message me</label>
+            <label class="toggle"><input type="checkbox" id="reply_groups"> Reply in groups when @mentioned</label>
+            <label class="toggle personal"><input type="checkbox" data-opt="ai_trigger"> Let me summon it in any chat with a trigger word</label>
+            <label class="muted personal">Trigger word</label>
+            <input class="personal" data-opt="trigger_word" placeholder="/ai">
+            <label class="muted">Only reply to these numbers (comma separated, empty = everyone)</label>
+            <input data-opt="allow_list" placeholder="+1 718 555 1234, +972 50 123 4567">
+            <label class="muted">Never reply to these numbers</label>
+            <input data-opt="block_list" placeholder="+1 347 555 0000">
+          </div>
+          <div>
+            <h3 class="sub">How it replies</h3>
+            <label class="toggle"><input type="checkbox" data-opt="prefix_on"> Start auto-replies with a label</label>
+            <input data-opt="prefix_text" placeholder="🤖" style="max-width:200px">
+            <label class="toggle"><input type="checkbox" data-opt="use_emojis"> Use emojis</label>
+            <label class="toggle"><input type="checkbox" data-opt="quote_reply"> Quote the message it's answering</label>
+            <label class="toggle"><input type="checkbox" data-opt="typing"> Show "typing…"</label>
+            <label class="toggle"><input type="checkbox" data-opt="memory"> Remember the conversation</label>
+            <label class="muted">Reply length</label>
+            <select data-opt="reply_length"><option value="short">Short</option><option value="medium">Medium</option><option value="long">Detailed</option></select>
+            <label class="muted">Language (empty = same as the sender)</label>
+            <input data-opt="language" placeholder="e.g. English, Yiddish, Hebrew, Spanish">
+            <label class="muted">Wait before replying (seconds, 0–60)</label>
+            <input data-opt="reply_delay" type="number" min="0" max="60" style="max-width:120px">
+          </div>
+        </div>
+        <h3 class="sub">Quiet hours</h3>
+        <label class="toggle"><input type="checkbox" data-opt="quiet_enabled"> Don't reply during quiet hours</label>
+        <div class="row">
+          <div><label class="muted">From</label><input data-opt="quiet_start" type="time"></div>
+          <div><label class="muted">To</label><input data-opt="quiet_end" type="time"></div>
+          <div style="flex:1;min-width:200px"><label class="muted">Time zone</label><input data-opt="timezone" placeholder="America/New_York"></div>
+        </div>
+        <label class="muted">Away message during quiet hours (optional, sent once per chat)</label>
+        <input data-opt="away_message" placeholder="I'm offline right now, I'll get back to you soon.">
+        <p class="muted">Anyone can also type <code>/stop</code> in a chat to silence the agent there, and <code>/start</code> to turn it back on.</p>
+        <div class="row"><button onclick="saveSettings()">Save options</button><span class="muted" id="saved2"></span></div>
+      </div>
+
       <div class="card">
         <h2>Test the AI here</h2>
         <div class="row"><input id="testIn" placeholder="Ask anything…" style="flex:1;margin:0"><button onclick="testAI()">Send</button></div>
@@ -166,7 +212,7 @@ function showTab(t) {
   $('sessionPane').classList.toggle('hidden', t === 'admin');
   $('adminPane').classList.toggle('hidden', t !== 'admin');
   $('paneTitle').textContent = t === 'house' ? 'Shared Air number (everyone can chat)' : 'Connect your WhatsApp';
-  $('autoWrap').classList.toggle('hidden', t === 'house');
+  document.querySelectorAll('.personal').forEach((el) => el.classList.toggle('hidden', t === 'house'));
   clearInterval(poll);
   if (t === 'admin') { loadAdmin(); poll = setInterval(loadAdmin, 5000); }
   else { refresh(); loadSettings(); poll = setInterval(refresh, 2500); }
@@ -190,10 +236,18 @@ async function unlink() { if (confirm('Unlink this WhatsApp from the agent?')) r
 async function loadSettings() {
   const s = await api('/api/settings' + target());
   $('persona').value = s.persona || ''; $('enabled').checked = !!s.enabled; $('auto_reply').checked = !!s.auto_reply; $('reply_groups').checked = !!s.reply_groups;
+  document.querySelectorAll('[data-opt]').forEach((el) => {
+    const v = s.options[el.dataset.opt];
+    if (el.type === 'checkbox') el.checked = !!v; else el.value = v ?? '';
+  });
 }
 async function saveSettings() {
-  await api('/api/settings' + target(), { method: 'POST', body: { persona: $('persona').value, enabled: $('enabled').checked, auto_reply: $('auto_reply').checked, reply_groups: $('reply_groups').checked } });
-  $('saved').textContent = 'Saved ✓'; setTimeout(() => ($('saved').textContent = ''), 2000);
+  const options = {};
+  document.querySelectorAll('[data-opt]').forEach((el) => {
+    options[el.dataset.opt] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) : el.value;
+  });
+  await api('/api/settings' + target(), { method: 'POST', body: { persona: $('persona').value, enabled: $('enabled').checked, auto_reply: $('auto_reply').checked, reply_groups: $('reply_groups').checked, options } });
+  ['saved', 'saved2'].forEach((id) => { $(id).textContent = 'Saved ✓'; setTimeout(() => ($(id).textContent = ''), 2000); });
 }
 async function testAI() {
   $('testOut').textContent = 'Thinking…';
