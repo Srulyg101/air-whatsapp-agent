@@ -2,6 +2,12 @@
 
 This product branch is **code only** until explicitly reviewed and deployed. The live Hostinger Docker Manager deployment must be updated separately; editing GitHub does not by itself change its Compose configuration. **Do not reconnect a personal WhatsApp number before securing the server.**
 
+## Important: another Hostinger deployment workflow currently exists on main
+
+The `main` branch independently gained `.github/workflows/deploy.yml` while this feature branch was being developed. That workflow triggers `hostinger/deploy-on-vps@v2` on **every push to main**; it is separate from the reviewed manual SSH workflow in this branch. Its observed October 14 executions failed because GitHub did not provide `HOSTINGER_API_KEY`. It also needs `HOSTINGER_VM_ID` as a repository Actions variable.
+
+**Before merging anything to main**, choose exactly **one** release route: either disable/gate the existing automatic Hostinger Action and use this branch's reviewed-SHA manual workflow, or replace this branch's manual workflow with a correctly protected *manual* Hostinger API deployment. Do not configure automatic Hostinger API credentials until the release behavior is agreed and the live Compose configuration is secured. Otherwise, adding credentials could make the next push deploy without further approval.
+
 ## What works in the source code
 
 - New responsive WhatsApp-inspired Air Agent dashboard and "Scan any WhatsApp number. Done." onboarding. Link a number **you control**.
