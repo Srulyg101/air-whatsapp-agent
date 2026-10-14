@@ -1,0 +1,29 @@
+# Free automatic HTTPS for Air Agent (Let's Encrypt via Caddy).
+# Works with no domain: open https://<your-ip-with-dashes>.sslip.io  (e.g. https://1-2-3-4.sslip.io)
+# With your own domain: point its DNS A record at the server and set DOMAIN=your.domain.
+# Caddy asks the app (/api/tls/allow) before issuing any certificate, so only this
+# server's sslip.io/nip.io name or your DOMAIN get certificates.
+{
+	on_demand_tls {
+		ask http://app:3000/api/tls/allow
+	}
+}
+
+https:// {
+	tls {
+		on_demand
+	}
+	encode gzip
+	reverse_proxy app:3000
+}
+
+http:// {
+	# Plain IP stays on HTTP (handy for first setup); names get redirected to HTTPS.
+	@byip header_regexp Host ^[0-9.]+(:[0-9]+)?$
+	handle @byip {
+		reverse_proxy app:3000
+	}
+	handle {
+		redir https://{host}{uri} permanent
+	}
+}
