@@ -92,6 +92,8 @@ CREATE TABLE IF NOT EXISTS muted_chats (
 );
 `);
 try { db.exec('ALTER TABLE settings ADD COLUMN options TEXT'); } catch (_) { /* already there */ }
+try { db.exec('ALTER TABLE bot_emails ADD COLUMN provider_id TEXT'); } catch (_) { /* already there */ }
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_email_provider ON bot_emails(session_id, provider_id) WHERE provider_id IS NOT NULL');
 // Invalidate old plaintext bearer tokens once; new token values are stored as hashes.
 db.prepare("DELETE FROM auth_tokens WHERE token NOT LIKE 'sha256:%'").run();
 
@@ -155,7 +157,7 @@ const q = {
   getMailbox: db.prepare('SELECT * FROM bot_mailboxes WHERE session_id = ?'),
   mailboxByAlias: db.prepare('SELECT * FROM bot_mailboxes WHERE alias = ? AND enabled=1'),
   createMailbox: db.prepare('INSERT INTO bot_mailboxes(session_id, alias) VALUES (?, ?)'),
-  addBotEmail: db.prepare('INSERT INTO bot_emails(session_id, sender, recipient, subject, body) VALUES (?, ?, ?, ?, ?)'),
+  addBotEmail: db.prepare('INSERT OR IGNORE INTO bot_emails(session_id, sender, recipient, subject, body, provider_id) VALUES (?, ?, ?, ?, ?, ?)'),
   listBotEmails: db.prepare('SELECT id, sender, recipient, subject, substr(body,1,140) preview, received_at FROM bot_emails WHERE session_id = ? ORDER BY id DESC LIMIT 100'),
   getBotEmail: db.prepare('SELECT id, sender, recipient, subject, body, received_at FROM bot_emails WHERE session_id = ? AND id = ?'),
   pruneBotEmails: db.prepare("DELETE FROM bot_emails WHERE received_at < strftime('%s','now') - ?"),
