@@ -64,6 +64,11 @@ CREATE TABLE IF NOT EXISTS reply_receipts (
 CREATE TABLE IF NOT EXISTS controller_auth (
   session_id TEXT PRIMARY KEY, pin_hash TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS processed_controller_commands (
+  session_id TEXT NOT NULL, message_id TEXT NOT NULL,
+  ts INTEGER DEFAULT (strftime('%s','now')),
+  PRIMARY KEY(session_id, message_id)
+);
 CREATE TABLE IF NOT EXISTS controller_audit (
   id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
   peer_masked TEXT NOT NULL, action TEXT NOT NULL, outcome TEXT NOT NULL,
@@ -143,6 +148,8 @@ const q = {
   getControllerPin: db.prepare('SELECT pin_hash FROM controller_auth WHERE session_id = ?'),
   setControllerPin: db.prepare('INSERT INTO controller_auth (session_id, pin_hash) VALUES (?, ?) ON CONFLICT(session_id) DO UPDATE SET pin_hash=excluded.pin_hash'),
   logController: db.prepare('INSERT INTO controller_audit (session_id, peer_masked, action, outcome) VALUES (?, ?, ?, ?)'),
+  claimController: db.prepare('INSERT OR IGNORE INTO processed_controller_commands (session_id, message_id) VALUES (?, ?)'),
+  pruneProcessedControllers: db.prepare("DELETE FROM processed_controller_commands WHERE ts < strftime('%s','now') - ?"),
   listControllerAudit: db.prepare('SELECT id, session_id, peer_masked, action, outcome, ts FROM controller_audit WHERE session_id = ? ORDER BY id DESC LIMIT 50'),
   pruneControllerAudit: db.prepare("DELETE FROM controller_audit WHERE ts < strftime('%s','now') - ?"),
   getMailbox: db.prepare('SELECT * FROM bot_mailboxes WHERE session_id = ?'),
