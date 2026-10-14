@@ -7,6 +7,7 @@ const HELP = `*${config.botName}* — your AI on WhatsApp\n\n` +
   `Just send a message and I'll reply.\n\n` +
   `Commands:\n` +
   `/reset — forget this conversation\n` +
+  `/ai <question> — ask me from inside any chat (owner only)\n` +
   `/help — show this message`;
 
 const rate = new Map(); // key -> [timestamps]
@@ -73,11 +74,17 @@ async function handleMessage(m, ctx) {
   const mine = myIds(sock);
   const chatIds = [jid, m.key.remoteJidAlt, m.key.senderPn].map(userPart).filter(Boolean);
   const isSelfChat = !group && chatIds.some((c) => mine.includes(c));
-  console.log(`[${sessionId}] msg chat=${jid} fromMe=${!!m.key.fromMe} self=${isSelfChat} group=${!!group} len=${text.length}`);
+  console.log(`[${sessionId}] msg chat=${jid} alt=${m.key.remoteJidAlt || m.key.senderPn || '-'} fromMe=${!!m.key.fromMe} self=${isSelfChat} group=${!!group} len=${text.length}`);
 
   let shouldReply = false;
   let prefix = '';
-  if (m.key.fromMe) {
+  let prompt = text;
+  const aiTrigger = text.match(/^\s*(?:\/ai|@ai|ai:)\s+([\s\S]+)/i);
+  if (m.key.fromMe && aiTrigger && !isHouse) {
+    // Owner can summon the agent in ANY chat: "/ai what's the weather like in NYC?"
+    shouldReply = true;
+    prompt = aiTrigger[1].trim();
+  } else if (m.key.fromMe) {
     // The owner typing in their own "Message yourself" chat = talking to the agent.
     shouldReply = !isHouse && isSelfChat;
   } else if (group) {
@@ -105,7 +112,7 @@ async function handleMessage(m, ctx) {
   try { await sock.sendPresenceUpdate('composing', jid); } catch (_) {}
 
   const history = q.history.all(sessionId, jid, config.historyTurns * 2);
-  const messages = [{ role: 'system', content: buildSystemPrompt(settings) }, ...history, { role: 'user', content: text }];
+  const messages = [{ role: 'system', content: buildSystemPrompt(settings) }, ...history, { role: 'user', content: prompt }];
 
   let reply;
   try {
@@ -118,7 +125,7 @@ async function handleMessage(m, ctx) {
   }
   if (!reply) reply = '🤔';
 
-  q.addMsg.run(sessionId, jid, 'user', text);
+  q.addMsg.run(sessionId, jid, 'user', prompt);
   q.addMsg.run(sessionId, jid, 'assistant', reply);
   try { await sock.sendPresenceUpdate('paused', jid); } catch (_) {}
   await send(prefix + reply);

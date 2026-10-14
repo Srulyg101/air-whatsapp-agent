@@ -89,7 +89,7 @@ class Session {
     });
 
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
-      console.log(`[${this.id}] upsert type=${type} n=${messages.length} me=${JSON.stringify(sock.authState?.creds?.me || {})}`);
+      console.log(`[${this.id}] upsert type=${type} n=${messages.length}`);
       for (const m of messages) {
         // Messages typed on the owner's own phone can arrive as 'append'; only handle fresh ones.
         const ts = Number(m.messageTimestamp || 0);
