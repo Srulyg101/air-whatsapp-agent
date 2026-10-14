@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const Database = require('better-sqlite3');
+const crypto = require('node:crypto');
 
 test('server denies unauthenticated access and requires private admin bootstrap', { timeout: 30000 }, async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'air-agent-security-'));
@@ -16,7 +17,9 @@ test('server denies unauthenticated access and requires private admin bootstrap'
     cwd: path.resolve(__dirname, '..'),
     env: { ...process.env, PORT: String(port), DATA_DIR: tmp,
       OPEN_SIGNUP: 'false', COOKIE_SECURE: 'true',
-      BOOTSTRAP_ADMIN_TOKEN: secret, OLLAMA_URL: 'http://127.0.0.1:9' },
+      BOOTSTRAP_ADMIN_TOKEN: secret, OLLAMA_URL: 'http://127.0.0.1:9',
+      MAIL_DOMAIN: 'airagent.test',
+      INBOUND_EMAIL_WEBHOOK_SECRET: 'for-local-tests-only-32-character-inbound-secret' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
@@ -67,6 +70,56 @@ test('server denies unauthenticated access and requires private admin bootstrap'
     const audit = await fetch(url + '/api/admin/reply-audit', { headers: { Cookie: cookie } });
     assert.equal(audit.status, 200);
     assert.deepEqual((await audit.json()).events, []);
+    const state = await fetch(url + '/api/reply-state', { headers: { Cookie: cookie } });
+    assert.equal(state.status, 200);
+    assert.equal((await state.json()).answeredChats, 0);
+    assert.equal((await post('/api/reply-state/reset', {}, cookie)).status, 200);
+
+    // Controller stays off without explicit approved phone numbers.
+    assert.equal((await post('/api/settings', {
+      options: { control_enabled: true, control_numbers: '' },
+    }, cookie)).status, 400);
+    assert.equal((await post('/api/controller/pin', { pin: 'short' }, cookie)).status, 400);
+    assert.equal((await post('/api/controller/pin', { pin: 'StrongController12345' }, cookie)).status, 200);
+    assert.equal((await post('/api/settings', {
+      options: { control_enabled: true, control_numbers: '13475550123', email_allowed_to: 'office@example.test' },
+    }, cookie)).status, 200);
+    const controller = await fetch(url + '/api/controller/status', { headers: { Cookie: cookie } });
+    assert.equal((await controller.json()).hasPin, true);
+
+    // Email address is an alias only; live MX/transport is provisioned separately.
+    const mailStatus = await fetch(url + '/api/email/status', { headers: { Cookie: cookie } });
+    const setup = await mailStatus.json();
+    assert.equal(setup.outboundReady, false);
+    assert.equal(setup.domainReady, true);
+    assert.equal(setup.inboundReady, true);
+    const mailbox = await post('/api/email/provision', {}, cookie);
+    assert.equal(mailbox.status, 200);
+    const { address } = await mailbox.json();
+    assert.match(address, /^agent-[0-9a-f]{10}@airagent\.test$/);
+    const payload = JSON.stringify({ to: address, from:'client@example.test',
+      subject:'Hello bot', text:'A private test message' });
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const secretKey = 'for-local-tests-only-32-character-inbound-secret';
+    const signature = crypto.createHmac('sha256', secretKey)
+      .update(timestamp + '.').update(Buffer.from(payload)).digest('hex');
+    const inbound = await fetch(url + '/api/webhooks/inbound-email', {
+      method:'POST',headers:{ 'Content-Type':'application/json',
+        'X-Air-Timestamp':timestamp, 'X-Air-Signature':signature },body:payload,
+    });
+    assert.equal(inbound.status, 202);
+    const unsigned = await fetch(url + '/api/webhooks/inbound-email', {
+      method:'POST',headers:{ 'Content-Type':'application/json' },body:payload,
+    });
+    assert.equal(unsigned.status, 403);
+    const inbox = await fetch(url + '/api/email/inbox', { headers: { Cookie: cookie } });
+    const emails = (await inbox.json()).messages;
+    assert.equal(emails.length, 1);
+    assert.equal(emails[0].subject, 'Hello bot');
+    const detail = await fetch(url + '/api/email/inbox/' + emails[0].id, { headers:{ Cookie:cookie } });
+    assert.equal((await detail.json()).message.body,'A private test message');
+    assert.equal((await post('/api/email/send', {to:'recipient@example.test',subject:'Hi',text:'Test'}, cookie)).status, 422);
+
     const panic = await post('/api/admin/disconnect-all', {}, cookie);
     assert.equal(panic.status, 200);
     assert.equal((await panic.json()).ok, true);
