@@ -787,7 +787,7 @@ const PRESETS = [
   ['openrouter', 'OpenRouter (hundreds of models)', 'https://openrouter.ai/api/v1', 'meta-llama/llama-3.3-70b-instruct'],
   ['together', 'Together AI', 'https://api.together.xyz/v1', 'meta-llama/Llama-3.3-70B-Instruct-Turbo'],
   ['deepseek', 'DeepSeek', 'https://api.deepseek.com/v1', 'deepseek-chat'],
-  ['openai', 'OpenAI', 'https://api.openai.com/v1', 'gpt-4o-mini'],
+  ['openai', 'OpenAI', 'https://api.openai.com/v1', 'gpt-4o-mini'],\n  ['anthropic', 'Anthropic Claude', 'https://api.anthropic.com/v1', 'claude-sonnet-5-5'],
   ['custom', 'Other OpenAI-compatible API', '', ''],
 ];
 const OR_BASE = 'https://openrouter.ai/api/v1';
@@ -825,7 +825,7 @@ PAGES.model = {
     ]))}
 
     <details class="card"><summary>Advanced: use your own API key</summary>
-      <p class="small muted">Any OpenAI-compatible service: Groq, Together, DeepSeek, OpenAI, a self-hosted vLLM…</p>
+      <p class="small muted">OpenAI-compatible services use their own API key. Claude uses an Anthropic API key; it cannot use an OpenAI key.</p>
       <div class="field"><label class="lbl">Quick setup</label><select id="preset"><option value="">Choose a provider…</option>${PRESETS.map(([id, l]) => `<option value="${id}">${esc(l)}</option>`).join('')}</select></div>
       ${txt('ai_base_url', 'API base URL', 'https://api.groq.com/openai/v1')}
       <div class="field"><label class="lbl">Model</label><input data-opt="ai_model" list="modelList" value="${esc(op.ai_model)}" placeholder="llama-3.3-70b-versatile"><datalist id="modelList"></datalist></div>
