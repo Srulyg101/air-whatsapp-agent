@@ -1,3 +1,5 @@
+// Protect all new database and journal files from the first open.
+process.umask(0o077);
 const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
