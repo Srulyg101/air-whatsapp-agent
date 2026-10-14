@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Air Agent · WhatsApp AI</title>
+<style>
+  :root { --bg:#0b141a; --card:#111b21; --line:#233138; --text:#e9edef; --muted:#8696a0; --green:#25d366; --green2:#00a884; --red:#f15c6d; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text); }
+  .wrap { max-width:920px; margin:0 auto; padding:24px 16px 60px; }
+  header { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; }
+  .logo { font-weight:700; font-size:20px; display:flex; gap:10px; align-items:center; }
+  .dot { width:12px; height:12px; border-radius:50%; background:var(--green); box-shadow:0 0 12px var(--green); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:22px; margin-bottom:18px; }
+  h1 { font-size:28px; margin:0 0 6px; } h2 { font-size:18px; margin:0 0 14px; }
+  .muted { color:var(--muted); }
+  input, textarea { width:100%; padding:11px 12px; border-radius:10px; border:1px solid var(--line); background:#0b141a; color:var(--text); font:inherit; margin:6px 0 12px; }
+  textarea { min-height:90px; resize:vertical; }
+  button { background:var(--green2); color:#fff; border:0; border-radius:10px; padding:11px 18px; font:inherit; font-weight:600; cursor:pointer; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--text); }
+  button.danger { background:transparent; border:1px solid var(--red); color:var(--red); }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; } @media (max-width:720px){ .grid{ grid-template-columns:1fr; } }
+  .qr { background:#fff; border-radius:12px; padding:10px; width:260px; max-width:100%; display:block; margin:12px 0; }
+  .pill { display:inline-block; padding:3px 10px; border-radius:999px; font-size:13px; border:1px solid var(--line); }
+  .pill.open { border-color:var(--green); color:var(--green); }
+  .pill.qr, .pill.connecting { border-color:#f7c948; color:#f7c948; }
+  .toggle { display:flex; align-items:center; gap:10px; margin:8px 0; } .toggle input { width:auto; margin:0; }
+  .err { color:var(--red); min-height:20px; }
+  .tabs { display:flex; gap:8px; margin-bottom:16px; } .tabs button { background:transparent; border:1px solid var(--line); }
+  .tabs button.active { background:var(--green2); border-color:var(--green2); }
+  table { width:100%; border-collapse:collapse; font-size:14px; } td,th { text-align:left; padding:6px 4px; border-bottom:1px solid var(--line); }
+  .stat { font-size:26px; font-weight:700; } .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; }
+  .hidden { display:none !important; }
+  ol { padding-left:20px; } a { color:var(--green); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo"><span class="dot"></span><span id="brand">Air Agent</span></div>
+    <div id="hdr" class="row hidden"><span class="muted" id="who"></span><button class="ghost" onclick="logout()">Log out</button></div>
+  </header>
+
+  <!-- AUTH -->
+  <section id="authView" class="hidden">
+    <div class="card" style="max-width:440px;margin:40px auto">
+      <h1 id="authTitle">Your AI on WhatsApp</h1>
+      <p class="muted">Create an account, scan a QR code, and your WhatsApp has an AI agent. Free and open source.</p>
+      <div id="nameWrap"><label>Name</label><input id="name" autocomplete="name"></div>
+      <label>Email</label><input id="email" type="email" autocomplete="email">
+      <label>Password</label><input id="password" type="password" autocomplete="current-password">
+      <div class="err" id="authErr"></div>
+      <div class="row"><button id="authBtn" onclick="submitAuth()">Create account</button>
+        <a href="#" id="authSwitch" onclick="switchAuth();return false">I already have an account</a></div>
+    </div>
+  </section>
+
+  <!-- APP -->
+  <section id="appView" class="hidden">
+    <div class="tabs" id="tabs">
+      <button class="active" data-tab="mine">My WhatsApp</button>
+      <button data-tab="house" class="adminOnly hidden">Shared Air number</button>
+      <button data-tab="admin" class="adminOnly hidden">Monitor</button>
+    </div>
+
+    <div id="houseBanner" class="card hidden">
+      <h2>💬 Chat with our number</h2>
+      <p>No setup needed: message <b id="houseNum"></b> on WhatsApp and the AI replies.
+        <a id="houseLink" target="_blank">Open chat →</a></p>
+    </div>
+
+    <div id="sessionPane">
+      <div class="grid">
+        <div class="card">
+          <h2 id="paneTitle">Connect your WhatsApp</h2>
+          <p>Status: <span class="pill" id="status">idle</span> <span class="muted" id="phone"></span></p>
+          <div id="qrWrap" class="hidden">
+            <img id="qr" class="qr" alt="QR code">
+            <ol class="muted">
+              <li>Open WhatsApp on your phone</li>
+              <li>Settings → <b>Linked devices</b> → <b>Link a device</b></li>
+              <li>Point your phone at this QR code</li>
+            </ol>
+          </div>
+          <div id="howTo" class="hidden">
+            <p>✅ Connected. Open the <b>"Message yourself"</b> chat in WhatsApp and talk to your agent.
+              Type <code>/help</code> for commands.</p>
+          </div>
+          <div class="row" style="margin-top:12px">
+            <button id="connectBtn" onclick="connect()">Show QR code</button>
+            <button id="unlinkBtn" class="danger hidden" onclick="unlink()">Unlink</button>
+          </div>
+          <div class="err" id="waErr"></div>
+        </div>
+
+        <div class="card">
+          <h2>Agent settings</h2>
+          <label class="muted">Personality / instructions (optional)</label>
+          <textarea id="persona" placeholder="e.g. You work for my bakery. Opening hours are 7am–5pm Sun–Thu…"></textarea>
+          <label class="toggle"><input type="checkbox" id="enabled"> Agent on</label>
+          <label class="toggle" id="autoWrap"><input type="checkbox" id="auto_reply"> Auto-reply to people who message me (replies start with 🤖)</label>
+          <label class="toggle"><input type="checkbox" id="reply_groups"> Reply in groups when @mentioned</label>
+          <div class="row" style="margin-top:10px"><button onclick="saveSettings()">Save</button><span class="muted" id="saved"></span></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Test the AI here</h2>
+        <div class="row"><input id="testIn" placeholder="Ask anything…" style="flex:1;margin:0"><button onclick="testAI()">Send</button></div>
+        <p id="testOut" class="muted" style="white-space:pre-wrap"></p>
+      </div>
+    </div>
+
+    <div id="adminPane" class="hidden">
+      <div class="card"><h2>Live monitor</h2><div class="stats" id="stats"></div></div>
+      <div class="card"><h2>Sessions</h2><table id="sessTable"></table></div>
+      <div class="card"><h2>Users</h2><table id="userTable"></table></div>
+    </div>
+  </section>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let me = null, tab = 'mine', mode = 'signup', poll = null;
+const api = async (url, opts = {}) => {
+  const r = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...opts, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || r.statusText);
+  return d;
+};
+const target = () => (tab === 'house' ? '?target=house' : '');
+
+function switchAuth() {
+  mode = mode === 'signup' ? 'login' : 'signup';
+  $('authBtn').textContent = mode === 'signup' ? 'Create account' : 'Log in';
+  $('authSwitch').textContent = mode === 'signup' ? 'I already have an account' : 'Create a new account';
+  $('nameWrap').classList.toggle('hidden', mode === 'login');
+}
+async function submitAuth() {
+  $('authErr').textContent = '';
+  try {
+    await api('/api/' + mode, { method: 'POST', body: { email: $('email').value, password: $('password').value, name: $('name').value } });
+    boot();
+  } catch (e) { $('authErr').textContent = e.message; }
+}
+async function logout() { await api('/api/logout', { method: 'POST' }); location.reload(); }
+
+async function boot() {
+  try { me = await api('/api/me'); } catch { $('authView').classList.remove('hidden'); $('appView').classList.add('hidden'); return; }
+  $('authView').classList.add('hidden'); $('appView').classList.remove('hidden'); $('hdr').classList.remove('hidden');
+  $('brand').textContent = me.botName; $('who').textContent = me.user.email;
+  document.querySelectorAll('.adminOnly').forEach((el) => el.classList.toggle('hidden', !me.user.is_admin));
+  if (me.houseNumber) {
+    $('houseBanner').classList.remove('hidden'); $('houseNum').textContent = '+' + me.houseNumber;
+    $('houseLink').href = 'https://wa.me/' + me.houseNumber + '?text=Hi';
+  }
+  showTab('mine');
+}
+
+function showTab(t) {
+  tab = t;
+  document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === t));
+  $('sessionPane').classList.toggle('hidden', t === 'admin');
+  $('adminPane').classList.toggle('hidden', t !== 'admin');
+  $('paneTitle').textContent = t === 'house' ? 'Shared Air number (everyone can chat)' : 'Connect your WhatsApp';
+  $('autoWrap').classList.toggle('hidden', t === 'house');
+  clearInterval(poll);
+  if (t === 'admin') { loadAdmin(); poll = setInterval(loadAdmin, 5000); }
+  else { refresh(); loadSettings(); poll = setInterval(refresh, 2500); }
+}
+document.querySelectorAll('#tabs button').forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
+
+function render(s) {
+  $('status').textContent = { open: 'connected', qr: 'waiting for scan', connecting: 'connecting…', logged_out: 'not linked', closed: 'not linked', idle: 'not linked' }[s.status] || s.status;
+  $('status').className = 'pill ' + s.status;
+  $('phone').textContent = s.me?.phone ? '+' + s.me.phone : '';
+  $('qrWrap').classList.toggle('hidden', !(s.status === 'qr' && s.qr));
+  if (s.qr) $('qr').src = s.qr;
+  $('howTo').classList.toggle('hidden', s.status !== 'open' || tab === 'house');
+  $('connectBtn').classList.toggle('hidden', ['open', 'qr', 'connecting'].includes(s.status));
+  $('unlinkBtn').classList.toggle('hidden', s.status !== 'open');
+}
+async function refresh() { try { render(await api('/api/wa/status' + target())); } catch (e) {} }
+async function connect() { $('waErr').textContent = ''; try { render(await api('/api/wa/connect' + target(), { method: 'POST' })); } catch (e) { $('waErr').textContent = e.message; } }
+async function unlink() { if (confirm('Unlink this WhatsApp from the agent?')) render(await api('/api/wa/logout' + target(), { method: 'POST' })); }
+
+async function loadSettings() {
+  const s = await api('/api/settings' + target());
+  $('persona').value = s.persona || ''; $('enabled').checked = !!s.enabled; $('auto_reply').checked = !!s.auto_reply; $('reply_groups').checked = !!s.reply_groups;
+}
+async function saveSettings() {
+  await api('/api/settings' + target(), { method: 'POST', body: { persona: $('persona').value, enabled: $('enabled').checked, auto_reply: $('auto_reply').checked, reply_groups: $('reply_groups').checked } });
+  $('saved').textContent = 'Saved ✓'; setTimeout(() => ($('saved').textContent = ''), 2000);
+}
+async function testAI() {
+  $('testOut').textContent = 'Thinking…';
+  try { $('testOut').textContent = (await api('/api/test-ai', { method: 'POST', body: { text: $('testIn').value } })).reply; }
+  catch (e) { $('testOut').textContent = 'Error: ' + e.message; }
+}
+
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+async function loadAdmin() {
+  const s = await api('/api/admin/stats');
+  const box = (label, val) => `<div class="card" style="margin:0;padding:14px"><div class="muted">${label}</div><div class="stat">${esc(val)}</div></div>`;
+  $('stats').innerHTML = [
+    box('AI engine', s.ollama.ok ? (s.ollama.modelReady ? 'Ready' : 'Downloading model') : 'DOWN'),
+    box('Model', s.model), box('Users', s.users),
+    box('Linked numbers', s.sessions.filter((x) => x.status === 'open').length),
+    box('Messages 24h', s.messages.last24h), box('AI avg reply', (s.ai.avgMs / 1000).toFixed(1) + 's'),
+    box('AI errors', s.ai.errors), box('Server RAM free', s.host.memFreeMb + ' / ' + s.host.memTotalMb + ' MB'),
+    box('Load', s.host.load.join(' ')), box('Uptime', Math.round(s.uptimeSec / 60) + ' min'),
+  ].join('');
+  $('sessTable').innerHTML = '<tr><th>Session</th><th>Status</th><th>Phone</th><th>Messages handled</th></tr>' +
+    s.sessions.map((x) => `<tr><td>${esc(x.id)}</td><td>${esc(x.status)}</td><td>${esc(x.phone || '')}</td><td>${x.handled}</td></tr>`).join('');
+  $('userTable').innerHTML = '<tr><th>#</th><th>Email</th><th>Name</th><th>Admin</th><th>Joined</th></tr>' +
+    s.userList.map((u) => `<tr><td>${u.id}</td><td>${esc(u.email)}</td><td>${esc(u.name)}</td><td>${u.is_admin ? '✓' : ''}</td><td>${new Date(u.created_at * 1000).toLocaleDateString()}</td></tr>`).join('');
+}
+$('testIn').addEventListener('keydown', (e) => e.key === 'Enter' && testAI());
+$('password').addEventListener('keydown', (e) => e.key === 'Enter' && submitAuth());
+boot();
+</script>
+</body>
+</html>
