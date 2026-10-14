@@ -1,11 +1,15 @@
+// Protect all new database and journal files from the first open.
+process.umask(0o077);
 const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
 const config = require('./config');
 
-fs.mkdirSync(config.dataDir, { recursive: true });
+fs.mkdirSync(config.dataDir, { recursive: true, mode: 0o700 });
+fs.chmodSync(config.dataDir, 0o700);
 const db = new Database(path.join(config.dataDir, 'app.db'));
 db.pragma('journal_mode = WAL');
+fs.chmodSync(path.join(config.dataDir, 'app.db'), 0o600);
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
@@ -37,6 +41,15 @@ CREATE TABLE IF NOT EXISTS messages (
   ts INTEGER DEFAULT (strftime('%s','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_msg_chat ON messages(session_id, chat_jid, id);
+CREATE TABLE IF NOT EXISTS reply_audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  peer_masked TEXT NOT NULL,
+  action TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  ts INTEGER DEFAULT (strftime('%s','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_reply_audit_ts ON reply_audit(ts);
 CREATE TABLE IF NOT EXISTS muted_chats (
   session_id TEXT NOT NULL,
   chat_jid TEXT NOT NULL,
@@ -44,13 +57,15 @@ CREATE TABLE IF NOT EXISTS muted_chats (
 );
 `);
 try { db.exec('ALTER TABLE settings ADD COLUMN options TEXT'); } catch (_) { /* already there */ }
+// Invalidate old plaintext bearer tokens once; new token values are stored as hashes.
+db.prepare("DELETE FROM auth_tokens WHERE token NOT LIKE 'sha256:%'").run();
 
 // Every per-number option with its default. Shown in the dashboard and enforced in agent.js.
 const DEFAULT_OPTIONS = {
   self_chat: true,          // answer in the owner's "Message yourself" chat
   ai_trigger: true,         // owner can type "/ai ..." in any chat
   trigger_word: '/ai',
-  allow_list: '',           // if set, ONLY reply to these numbers
+  allow_list: '',           // REQUIRED for personal incoming replies; empty = nobody
   block_list: '',           // never reply to these numbers
   prefix_on: true,          // start auto-replies with a label
   prefix_text: '🤖',
@@ -76,6 +91,9 @@ const q = {
   insertToken: db.prepare('INSERT INTO auth_tokens (token, user_id) VALUES (?, ?)'),
   userByToken: db.prepare('SELECT u.id, u.email, u.name, u.is_admin FROM auth_tokens t JOIN users u ON u.id = t.user_id WHERE t.token = ?'),
   deleteToken: db.prepare('DELETE FROM auth_tokens WHERE token = ?'),
+  addReplyAudit: db.prepare('INSERT INTO reply_audit (session_id, peer_masked, action, outcome) VALUES (?, ?, ?, ?)'),
+  listReplyAudits: db.prepare('SELECT id, session_id, peer_masked, action, outcome, ts FROM reply_audit ORDER BY id DESC LIMIT ?'),
+  pruneReplyAudits: db.prepare("DELETE FROM reply_audit WHERE ts < strftime('%s','now') - ?"),
   listUsers: db.prepare('SELECT id, email, name, is_admin, created_at FROM users ORDER BY id DESC'),
   getSettings: db.prepare('SELECT * FROM settings WHERE session_id = ?'),
   upsertSettings: db.prepare(`INSERT INTO settings (session_id, persona, auto_reply, reply_groups, enabled, options)

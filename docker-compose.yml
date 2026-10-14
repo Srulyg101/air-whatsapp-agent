@@ -22,15 +22,16 @@ services:
       - MODEL=${MODEL:-qwen2.5:1.5b}
       - NUM_CTX=${NUM_CTX:-4096}
       - HISTORY_TURNS=${HISTORY_TURNS:-12}
-      - OPEN_SIGNUP=${OPEN_SIGNUP:-true}
+      - OPEN_SIGNUP=${OPEN_SIGNUP:-false}
+      - BOOTSTRAP_ADMIN_TOKEN=${BOOTSTRAP_ADMIN_TOKEN:-}
       - RATE_LIMIT_PER_MIN=${RATE_LIMIT_PER_MIN:-12}
       - RETENTION_DAYS=${RETENTION_DAYS:-30}
-      - COOKIE_SECURE=${COOKIE_SECURE:-false}
+      - COOKIE_SECURE=${COOKIE_SECURE:-true}
       - OLLAMA_URL=http://ollama:11434
       - DATA_DIR=/data
       - PORT=3000
     ports:
-      - "${PUBLIC_PORT:-8080}:3000"
+      - "${BIND_IP:-127.0.0.1}:${PUBLIC_PORT:-8080}:3000"
     volumes:
       - agent-data:/data
       - agent-code:/srv/app
@@ -58,12 +59,12 @@ services:
     entrypoint: ["/bin/sh", "-c", "sleep 8; ollama pull ${MODEL:-qwen2.5:1.5b}"]
     restart: "no"
 
-  # Uptime monitoring dashboard on :3001
+  # Uptime monitoring dashboard on loopback :3001 (use SSH tunnel to access)
   uptime-kuma:
     image: louislam/uptime-kuma:1
     restart: unless-stopped
     ports:
-      - "3001:3001"
+      - "${BIND_IP:-127.0.0.1}:3001:3001"
     volumes:
       - uptime-data:/app/data
 

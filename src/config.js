@@ -14,10 +14,11 @@ module.exports = {
     "You are {BOT_NAME}, a friendly, sharp personal AI assistant chatting on WhatsApp. " +
     "Keep replies short and conversational (WhatsApp style), use plain text, and only use lists when they help. " +
     "Answer in the same language the user writes in. If you don't know something, say so."),
-  openSignup: env('OPEN_SIGNUP', 'true') === 'true',
+  openSignup: env('OPEN_SIGNUP', 'false') === 'true',
+  bootstrapAdminToken: env('BOOTSTRAP_ADMIN_TOKEN', ''),
   // Per-sender rate limit (messages per minute) to protect the server
   rateLimitPerMin: Number(env('RATE_LIMIT_PER_MIN', 12)),
   // Delete chat history older than N days (0 = keep forever)
   retentionDays: Number(env('RETENTION_DAYS', 30)),
-  cookieSecure: env('COOKIE_SECURE', 'false') === 'true',
+  cookieSecure: env('COOKIE_SECURE', 'true') === 'true',
 };
