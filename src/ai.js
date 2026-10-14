@@ -70,7 +70,7 @@ async function ollamaChat(p, messages, tools, temperature, timeoutMs) {
 }
 
 function isAnthropic(base) {
-  return String(base || '').replace(/\\/$/, '') === 'https://api.anthropic.com/v1';
+  return String(base || '').replace(/\/$/, '') === 'https://api.anthropic.com/v1';
 }
 
 function toAnthropicMessages(messages) {
