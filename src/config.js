@@ -3,6 +3,7 @@ const path = require('path');
 const env = (k, d) => (process.env[k] !== undefined && process.env[k] !== '' ? process.env[k] : d);
 
 module.exports = {
+  version: '2.0.0',
   port: Number(env('PORT', 3000)),
   dataDir: path.resolve(env('DATA_DIR', path.join(__dirname, '..', 'data'))),
   botName: env('BOT_NAME', 'Air Agent'),
@@ -10,14 +11,17 @@ module.exports = {
   model: env('MODEL', 'qwen2.5:3b'),
   numCtx: Number(env('NUM_CTX', 4096)),
   historyTurns: Number(env('HISTORY_TURNS', 12)),
-  systemPrompt: env('SYSTEM_PROMPT',
-    "You are {BOT_NAME}, a friendly, sharp personal AI assistant chatting on WhatsApp. " +
-    "Keep replies short and conversational (WhatsApp style), use plain text, and only use lists when they help. " +
-    "Answer in the same language the user writes in. If you don't know something, say so."),
-  openSignup: env('OPEN_SIGNUP', 'true') === 'true',
+  // Signups are controlled from the Admin page (closed by default). Set FORCE_OPEN_SIGNUP=true only for testing.
+  forceOpenSignup: env('FORCE_OPEN_SIGNUP', 'false') === 'true',
   // Per-sender rate limit (messages per minute) to protect the server
   rateLimitPerMin: Number(env('RATE_LIMIT_PER_MIN', 12)),
   // Delete chat history older than N days (0 = keep forever)
   retentionDays: Number(env('RETENTION_DAYS', 30)),
-  cookieSecure: env('COOKIE_SECURE', 'false') === 'true',
+  // 'auto' = secure cookies when the request came over HTTPS
+  cookieSecure: env('COOKIE_SECURE', 'auto'),
+  // Optional fixed encryption key for stored API keys/passwords (otherwise one is generated in DATA_DIR)
+  appSecret: env('APP_SECRET', ''),
+  maxUploadMb: Number(env('MAX_UPLOAD_MB', 15)),
+  // Local speech-to-text model (open-source Whisper via transformers.js)
+  whisperModel: env('WHISPER_MODEL', 'onnx-community/whisper-base'),
 };
