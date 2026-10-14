@@ -89,6 +89,10 @@ export default {
    Set `WEBHOOK_URL` and `SECRET` as Worker variables, then add a **catch-all** routing rule → this Worker.
 3. For sending from those addresses, add SMTP for the domain (Resend, Mailgun, Brevo, SES…) on the same Admin card.
 
+## WeChat integration status
+
+WeChat is not connected yet. See [WeChat integration requirements](docs/wechat-integration-requirements.md) for the supported account types and access required before a compliant integration can be built.
+
 ## Notes
 
 - WhatsApp linking uses the unofficial [Baileys](https://github.com/WhiskeySockets/Baileys) library
