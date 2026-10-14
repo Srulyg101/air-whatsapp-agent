@@ -336,37 +336,56 @@ app.post('/api/inbound/email', wrap(async (req, res) => {
 }));
 
 // ---------- one-click AI sign-in (OpenRouter OAuth, PKCE) ----------
-// Works two ways: click "Sign in" on this device, or scan the QR code and sign in on your phone.
-// The callback is bound to the one-time state nonce (not the browser cookie), so a phone that
-// isn't logged in to the dashboard can finish the sign-in; the dashboard polls /status.
+// Two ways to sign in:
+//  1. "Sign in on this device": the callback must come back to the same logged-in user + session.
+//  2. Scan the QR code on your phone: the QR opens a confirm page here that shows which Air Agent
+//     account will be connected; only after the person taps Continue is a callback from a browser
+//     that isn't logged in accepted. A browser logged in as a *different* user is always rejected.
+// Every state is single-use and expires after 15 minutes. The dashboard polls /status.
 const QRCode = require('qrcode');
-const oauthPending = new Map(); // nonce -> { sessionId, userId, verifier, at }
-const oauthDone = new Map();    // nonce -> { userId, ok, at }
+const OAUTH_TTL = 15 * 60_000;
+const oauthPending = new Map(); // state -> { sessionId, userId, loginToken, email, verifier, authUrl, handoff, phoneOk, at }
+const oauthDone = new Map();    // state -> { userId, ok, at }
+const oauthHandoff = new Map(); // handoff token -> state
+function oauthSweep() {
+  const now = Date.now();
+  for (const [k, v] of oauthPending) if (now - v.at > OAUTH_TTL) { oauthPending.delete(k); oauthHandoff.delete(v.handoff); }
+  for (const [k, v] of oauthDone) if (now - v.at > OAUTH_TTL) oauthDone.delete(k);
+}
+const maskEmail = (e) => String(e || '').replace(/^(.)(.*)(.@.*)$/, (_, a, m, z) => a + '•'.repeat(Math.min(m.length, 6)) + z);
+const htmlEsc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const simplePage = (icon, title, body) => `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Air Agent</title>
+<body style="font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;text-align:center;padding:16px;margin:0">
+<div style="max-width:420px"><div style="font-size:56px">${icon}</div><h2>${title}</h2>${body}</div></body>`;
+
 app.get('/api/ai/openrouter/start', auth, wrap(async (req, res) => {
   if (getApp('allow_custom_ai') !== '1') return res.status(403).json({ error: 'The admin has disabled custom AI providers' });
-  const verifier = crypto.randomBytes(48).toString('base64url');
-  const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
-  const nonce = crypto.randomBytes(16).toString('hex');
-  for (const [k, v] of oauthPending) if (Date.now() - v.at > 15 * 60_000) oauthPending.delete(k);
-  for (const [k, v] of oauthDone) if (Date.now() - v.at > 15 * 60_000) oauthDone.delete(k);
-  oauthPending.set(nonce, { sessionId: sid(req), userId: req.user.id, verifier, at: Date.now() });
   let host = '';
   try { host = new URL(`${req.protocol}://${req.get('host')}`).hostname.toLowerCase(); } catch {}
   const isLoopback = ['localhost', '127.0.0.1', '::1'].includes(host);
   if (req.protocol !== 'https' && !isLoopback) {
-    oauthPending.delete(nonce);
-    return res.status(400).json({ error: 'OpenRouter sign-in requires HTTPS. Open Air Agent through your HTTPS domain, then try again.' });
+    const ipHost = /^\d{1,3}(\.\d{1,3}){3}$/.test(host) ? `https://${host.replace(/\./g, '-')}.sslip.io` : '';
+    return res.status(400).json({ error: `OpenRouter sign-in requires HTTPS. ${ipHost ? `Open ${ipHost} (free HTTPS) and log in there, then try again.` : 'Open Air Agent through your HTTPS domain, then try again.'}`, https: ipHost || undefined });
   }
-  const callback = `${req.protocol}://${req.get('host')}/ai/openrouter/callback`;
+  oauthSweep();
+  const verifier = crypto.randomBytes(48).toString('base64url');
+  const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+  const state = crypto.randomBytes(16).toString('hex');
+  const handoff = crypto.randomBytes(18).toString('base64url');
+  const origin = `${req.protocol}://${req.get('host')}`;
   const authUrl = new URL('https://openrouter.ai/auth');
-  authUrl.searchParams.set('callback_url', callback);
-  authUrl.searchParams.set('state', nonce);
+  authUrl.searchParams.set('callback_url', `${origin}/ai/openrouter/callback`);
+  authUrl.searchParams.set('state', state);
   authUrl.searchParams.set('code_challenge', challenge);
   authUrl.searchParams.set('code_challenge_method', 'S256');
   authUrl.searchParams.set('key_label', 'Air Agent');
-  const qr = await QRCode.toDataURL(authUrl.toString(), { margin: 1, width: 300, errorCorrectionLevel: 'L' });
-  res.json({ url: authUrl.toString(), qr, state: nonce });
+  oauthPending.set(state, { sessionId: sid(req), userId: req.user.id, loginToken: req.cookies.token, email: req.user.email, verifier, authUrl: authUrl.toString(), handoff, phoneOk: false, at: Date.now() });
+  oauthHandoff.set(handoff, state);
+  const phoneUrl = `${origin}/ai/openrouter/phone?h=${handoff}`;
+  const qr = await QRCode.toDataURL(phoneUrl, { margin: 1, width: 300 });
+  res.json({ url: authUrl.toString(), qr, state });
 }));
+
 app.get('/api/ai/openrouter/status', auth, (req, res) => {
   const state = String(req.query.state || '');
   const d = oauthDone.get(state);
@@ -374,18 +393,42 @@ app.get('/api/ai/openrouter/status', auth, (req, res) => {
   const p = oauthPending.get(state);
   res.json({ done: false, expired: !p || p.userId !== req.user.id });
 });
+
+// QR landing page on the phone: show which account gets connected before going to OpenRouter.
+app.get('/ai/openrouter/phone', (req, res) => {
+  oauthSweep();
+  const state = oauthHandoff.get(String(req.query.h || ''));
+  const p = state && oauthPending.get(state);
+  if (!p) return res.status(410).type('html').send(simplePage('⌛', 'This code expired', '<p style="color:#555">Go back to the dashboard and click Sign in again.</p>'));
+  res.type('html').send(simplePage('🔐', 'Connect OpenRouter',
+    `<p style="color:#555">Your OpenRouter account will power the AI for this Air Agent account:</p>
+     <p style="font-size:18px"><b>${htmlEsc(maskEmail(p.email))}</b></p>
+     <p style="color:#a33;font-size:14px">Only continue if this is <b>your own</b> Air Agent account and you just scanned this code yourself.</p>
+     <p><a href="/ai/openrouter/phone/go?h=${encodeURIComponent(String(req.query.h))}" style="display:inline-block;background:#00a884;color:#fff;padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:600">Continue to OpenRouter</a></p>`));
+});
+app.get('/ai/openrouter/phone/go', (req, res) => {
+  const state = oauthHandoff.get(String(req.query.h || ''));
+  const p = state && oauthPending.get(state);
+  if (!p) return res.redirect('/ai/openrouter/phone');
+  oauthHandoff.delete(String(req.query.h));
+  p.phoneOk = true;
+  res.redirect(p.authUrl);
+});
+
 app.get('/ai/openrouter/callback', async (req, res) => {
   const state = String(req.query.state || '');
   const p = oauthPending.get(state);
   oauthPending.delete(state);
+  if (p) oauthHandoff.delete(p.handoff);
   const user = req.cookies.token && q.userByToken.get(req.cookies.token);
-  const sameBrowser = !!(p && user && user.id === p.userId);
-  const page = (ok) => res.type('html').send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Air Agent</title>
-<body style="font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;text-align:center;padding:16px">
-<div><div style="font-size:56px">${ok ? '✅' : '⚠️'}</div><h2>${ok ? 'Connected to OpenRouter' : 'Sign-in failed'}</h2>
-<p style="color:#555">${ok ? 'Your assistant is now using your OpenRouter account. You can close this page.' : 'Please go back to the dashboard and try again.'}</p></div></body>`);
-  const back = (msg) => (sameBrowser ? res.redirect(`/#/model?${msg}`) : page(msg === 'signin=ok'));
-  if (!p || !req.query.code) return back('signin=failed');
+  const sameSession = !!(p && user && user.id === p.userId && req.cookies.token === p.loginToken);
+  const page = (ok) => res.type('html').send(ok
+    ? simplePage('✅', 'Connected to OpenRouter', '<p style="color:#555">Your assistant now uses your OpenRouter account. You can close this page — the dashboard updates by itself.</p>')
+    : simplePage('⚠️', 'Sign-in failed', '<p style="color:#555">Go back to the dashboard and try again.</p>'));
+  const back = (ok) => (sameSession ? res.redirect(`/#/model?signin=${ok ? 'ok' : 'failed'}`) : page(ok));
+  // Allowed: same user + same session, or a confirmed phone hand-off from a browser not logged in as someone else.
+  const allowed = p && req.query.code && (sameSession || (p.phoneOk && (!user || user.id === p.userId)));
+  if (!allowed) { if (p) oauthDone.set(state, { userId: p.userId, ok: false, at: Date.now() }); return back(false); }
   const finish = (ok) => oauthDone.set(state, { userId: p.userId, ok, at: Date.now() });
   try {
     const r = await fetch('https://openrouter.ai/api/v1/auth/keys', {
@@ -402,13 +445,35 @@ app.get('/ai/openrouter/callback', async (req, res) => {
     });
     logEvent(p.sessionId, 'info', null, 'Signed in to OpenRouter — smarter AI connected');
     finish(true);
-    back('signin=ok');
+    back(true);
   } catch (e) {
     console.error('OpenRouter sign-in failed:', e.message);
     finish(false);
-    back('signin=failed');
+    back(false);
   }
 });
+
+// ---------- free HTTPS (Caddy on-demand TLS) ----------
+// Caddy asks here before getting a Let's Encrypt certificate for a hostname.
+// Allowed: DOMAIN (env or Admin), or <this-server-ip>.sslip.io / .nip.io (free, no domain needed).
+let publicIp = process.env.PUBLIC_IP || '';
+async function getPublicIp() {
+  if (publicIp) return publicIp;
+  try { publicIp = (await (await fetch('https://api.ipify.org', { signal: AbortSignal.timeout(5000) })).text()).trim(); } catch {}
+  return publicIp;
+}
+app.get('/api/tls/allow', wrap(async (req, res) => {
+  const d = String(req.query.domain || '').toLowerCase();
+  const custom = (process.env.DOMAIN || getApp('domain') || '').toLowerCase().trim();
+  if (custom && d === custom) return res.send('ok');
+  const m = d.match(/^(?:[a-z0-9-]+\.)?(\d{1,3})[.-](\d{1,3})[.-](\d{1,3})[.-](\d{1,3})\.(?:sslip|nip)\.io$/);
+  if (m) {
+    const ip = m.slice(1, 5).join('.');
+    const mine = await getPublicIp();
+    if (!mine || ip === mine) return res.send('ok');
+  }
+  res.status(403).send('no');
+}));
 
 // ---------- admin ----------
 async function snapshot() {
