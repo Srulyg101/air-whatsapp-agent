@@ -193,6 +193,15 @@ app.delete('/api/kb/:id', auth, (req, res) => { kb.deleteDocument(sid(req), Numb
 app.post('/api/kb/search', auth, (req, res) => res.json(kb.search(sid(req), String(req.body?.q || ''), 5)));
 
 // ---------- AI model ----------
+app.get('/api/ai/models', auth, wrap(async (req, res) => {
+  const settings = getSettings(sid(req));
+  if (settings.options.ai_mode !== 'custom') throw bad('Connect a custom AI provider first');
+  if (getApp('allow_custom_ai') !== '1') throw bad('The admin has disabled custom AI providers', 403);
+  const provider = ai.resolveProvider(settings);
+  const models = await ai.listModels(provider);
+  res.json({ models: models.slice(0, 300), current: provider.model });
+}));
+
 app.post('/api/ai/test', auth, wrap(async (req, res) => {
   const id = sid(req);
   const b = req.body || {};
