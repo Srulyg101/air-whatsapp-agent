@@ -20,8 +20,13 @@ function rateLimited(key) {
 const userPart = (jid) => (jid || '').split('@')[0].split(':')[0];
 
 function extractText(m) {
-  const msg = m.message || {};
-  const inner = msg.ephemeralMessage?.message || msg.viewOnceMessage?.message || msg;
+  let inner = m.message || {};
+  for (let i = 0; i < 4; i++) {
+    const next = inner.deviceSentMessage?.message || inner.ephemeralMessage?.message ||
+      inner.viewOnceMessage?.message || inner.viewOnceMessageV2?.message || inner.documentWithCaptionMessage?.message;
+    if (!next) break;
+    inner = next;
+  }
   return (
     inner.conversation ||
     inner.extendedTextMessage?.text ||
@@ -31,9 +36,14 @@ function extractText(m) {
   ).trim();
 }
 
+function myIds(sock) {
+  const me = sock.authState?.creds?.me || {};
+  return [sock.user?.id, sock.user?.lid, me.id, me.lid].map(userPart).filter(Boolean);
+}
+
 function mentionsMe(m, sock) {
   const ctx = m.message?.extendedTextMessage?.contextInfo;
-  const mine = [userPart(sock.user?.id), userPart(sock.user?.lid)].filter(Boolean);
+  const mine = myIds(sock);
   return (ctx?.mentionedJid || []).some((j) => mine.includes(userPart(j)));
 }
 
@@ -60,8 +70,10 @@ async function handleMessage(m, ctx) {
   if (!settings.enabled) return;
 
   const group = isJidGroup(jid);
-  const myIds = [userPart(sock.user?.id), userPart(sock.user?.lid)].filter(Boolean);
-  const isSelfChat = !group && myIds.includes(userPart(jid));
+  const mine = myIds(sock);
+  const chatIds = [jid, m.key.remoteJidAlt, m.key.senderPn].map(userPart).filter(Boolean);
+  const isSelfChat = !group && chatIds.some((c) => mine.includes(c));
+  console.log(`[${sessionId}] msg chat=${jid} fromMe=${!!m.key.fromMe} self=${isSelfChat} group=${!!group} len=${text.length}`);
 
   let shouldReply = false;
   let prefix = '';

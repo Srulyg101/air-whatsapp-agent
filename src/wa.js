@@ -89,8 +89,11 @@ class Session {
     });
 
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
-      if (type !== 'notify') return;
+      console.log(`[${this.id}] upsert type=${type} n=${messages.length} me=${JSON.stringify(sock.authState?.creds?.me || {})}`);
       for (const m of messages) {
+        // Messages typed on the owner's own phone can arrive as 'append'; only handle fresh ones.
+        const ts = Number(m.messageTimestamp || 0);
+        if (type !== 'notify' && !(m.key?.fromMe && ts && Date.now() / 1000 - ts < 120)) continue;
         try {
           await handleMessage(m, { sessionId: this.id, isHouse: this.isHouse, sock, sentIds: this.sentIds });
           this.handled++;
