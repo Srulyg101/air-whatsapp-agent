@@ -2,7 +2,7 @@ const { isJidGroup, isJidBroadcast, isJidStatusBroadcast, isJidNewsletter } = re
 const config = require('./config');
 const ai = require('./ai');
 const { q, getSettings } = require('./db');
-const { approvedSender, blockedSender, maskedPeer } = require('./security');
+const { approvedSender, blockedSender, maskedPeer, peerNumbers } = require('./security');
 const { handleControl } = require('./controller');
 
 const HELP = `*${config.botName}* — your AI on WhatsApp\n\n` +
@@ -104,6 +104,9 @@ async function handleMessage(m, ctx) {
   const mine = myIds(sock);
   const chatIds = [jid, m.key.remoteJidAlt, m.key.senderPn].map(userPart).filter(Boolean);
   const isSelfChat = !group && chatIds.some((c) => mine.includes(c));
+  // Use the verified phone identity rather than unstable @lid and @s.whatsapp.net IDs.
+  const verifiedPhone = peerNumbers(m)[0];
+  const receiptKey = !group && verifiedPhone ? 'phone:' + verifiedPhone : jid;
   console.log(`[${sessionId}] msg fromMe=${!!m.key.fromMe} group=${!!group} peer=${maskedPeer(m)} len=${text.length}`);
 
   // Opt-in: retain only messages observed since context was enabled.
@@ -129,7 +132,7 @@ async function handleMessage(m, ctx) {
       if (blockedSender(m, fresh.options.block_list)) return false;
       if (!isHouse && (!approvedSender(m, fresh.options.allow_list) ||
         (group ? !fresh.reply_groups : !fresh.auto_reply))) return false;
-      const receipt = !isHouse && !group ? q.hasReceipt.get(sessionId, jid) : null;
+      const receipt = !isHouse && !group ? q.hasReceipt.get(sessionId, receiptKey) : null;
       if (receipt && fresh.options.reply_once && !isHouse && !group) return false;
       if (receipt && Number(fresh.options.cooldown_minutes) > 0 &&
           Date.now() - receipt.last_reply_at * 1000 < Number(fresh.options.cooldown_minutes) * 60000) return false;
@@ -138,7 +141,7 @@ async function handleMessage(m, ctx) {
       const sent = await sock.sendMessage(jid, { text: body }, o.quote_reply ? { quoted: m } : undefined);
       if (sent?.key?.id) {
         sentIds.add(sent.key.id);
-        if (!m.key.fromMe && !isHouse && !group) q.recordReceipt.run(sessionId, jid);
+        if (!m.key.fromMe && !isHouse && !group) q.recordReceipt.run(sessionId, receiptKey);
         if (contextOn) {
           q.addObserved.run(sessionId, jid, String(sent.key.id), 'assistant', body.slice(0, 2000));
           q.trimObserved.run(sessionId, jid, sessionId, jid, 10);
@@ -183,7 +186,7 @@ async function handleMessage(m, ctx) {
   }
   if (!shouldReply) return;
   if (!m.key.fromMe && !isHouse && !group) {
-    const receipt = q.hasReceipt.get(sessionId, jid);
+    const receipt = q.hasReceipt.get(sessionId, receiptKey);
     if (receipt && o.reply_once) return;
     if (receipt && Number(o.cooldown_minutes) > 0 &&
         Date.now() - receipt.last_reply_at * 1000 < Number(o.cooldown_minutes) * 60000) return;
