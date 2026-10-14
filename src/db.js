@@ -90,6 +90,19 @@ CREATE TABLE IF NOT EXISTS reminders (
   status TEXT DEFAULT 'pending',    -- pending | sent | failed | cancelled
   created_at INTEGER DEFAULT (strftime('%s','now'))
 );
+CREATE TABLE IF NOT EXISTS emails (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  source TEXT NOT NULL,             -- imap | inbound
+  uid TEXT NOT NULL,
+  from_addr TEXT, from_name TEXT, to_addr TEXT,
+  subject TEXT, text TEXT, message_id TEXT,
+  date INTEGER,
+  created_at INTEGER DEFAULT (strftime('%s','now')),
+  UNIQUE (session_id, source, uid)
+);
+CREATE INDEX IF NOT EXISTS idx_emails ON emails(session_id, id);
+CREATE TABLE IF NOT EXISTS bot_emails (local TEXT PRIMARY KEY, session_id TEXT UNIQUE NOT NULL);
 CREATE TABLE IF NOT EXISTS notes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id TEXT NOT NULL,
@@ -123,6 +136,10 @@ const DEFAULT_OPTIONS = {
   selected_groups_reply: 'mention', // mention | all
   pause_on_manual: true,     // stop the AI in a chat when the owner types there
   pause_minutes: 60,
+  pause_forever: false,      // ...until the owner turns it back on
+  reply_once: false,         // answer each person once, then leave the chat to the owner
+  context_messages: 10,      // read the last N messages of the chat for context (0 = off)
+  owner_numbers: '',         // "command numbers": treated as the owner, can trigger any action
   // ---- style
   prefix_on: true,           // start replies to other people with a label
   prefix_text: '🤖',
@@ -172,9 +189,14 @@ const DEFAULT_OPTIONS = {
   call_provider: 'twilio',   // twilio (more later)
   twilio_sid: '', twilio_from: '',
   webhook_url: '',
+  // ---- bot email
+  act_email_read: 'me',      // read & reply to the bot's emails (off | me)
+  mail_check: true,          // check the connected mailbox
+  mail_notify: true,         // WhatsApp me when a new email arrives
+  imap_host: '', imap_port: 993, imap_user: '', imap_secure: true,
 };
 
-const SECRET_NAMES = ['ai_key', 'smtp_pass', 'twilio_token', 'voice_api_key', 'webhook_secret'];
+const SECRET_NAMES = ['ai_key', 'smtp_pass', 'twilio_token', 'voice_api_key', 'webhook_secret', 'imap_pass'];
 
 const q = {
   // users / auth
@@ -241,6 +263,14 @@ const q = {
   setReminder: db.prepare('UPDATE reminders SET status = ? WHERE id = ?'),
   listReminders: db.prepare("SELECT * FROM reminders WHERE session_id = ? ORDER BY (status = 'pending') DESC, due_ts DESC LIMIT 100"),
   cancelReminder: db.prepare("UPDATE reminders SET status = 'cancelled' WHERE id = ? AND session_id = ? AND status = 'pending'"),
+  addEmail: db.prepare(`INSERT OR IGNORE INTO emails (session_id, source, uid, from_addr, from_name, to_addr, subject, text, message_id, date)
+    VALUES (@s, @source, @uid, @from_addr, @from_name, @to_addr, @subject, @text, @message_id, @date)`),
+  listEmails: db.prepare('SELECT id, source, from_addr, from_name, to_addr, subject, substr(text, 1, 400) snippet, date, message_id FROM emails WHERE session_id = ? ORDER BY id DESC LIMIT ?'),
+  email: db.prepare('SELECT * FROM emails WHERE id = ? AND session_id = ?'),
+  claimEmail: db.prepare('INSERT INTO bot_emails (local, session_id) VALUES (?, ?)'),
+  releaseEmail: db.prepare('DELETE FROM bot_emails WHERE session_id = ?'),
+  emailOf: db.prepare('SELECT local FROM bot_emails WHERE session_id = ?'),
+  sessionOfEmail: db.prepare('SELECT session_id FROM bot_emails WHERE local = ?'),
   addNote: db.prepare('INSERT INTO notes (session_id, chat_jid, contact, text) VALUES (?, ?, ?, ?)'),
   listNotes: db.prepare('SELECT * FROM notes WHERE session_id = ? ORDER BY id DESC LIMIT 200'),
   delNote: db.prepare('DELETE FROM notes WHERE id = ? AND session_id = ?'),
@@ -254,6 +284,8 @@ const APP_DEFAULTS = {
   ai_model: '',         // empty = MODEL env
   voice_api_base: '',
   voice_api_model: 'whisper-1',
+  mail_domain: '',      // e.g. bots.airbiz.ai  -> each bot can claim name@bots.airbiz.ai
+  bot_smtp_host: '', bot_smtp_port: '587', bot_smtp_user: '',
 };
 function getApp(key) { const r = q.getApp.get(key); return r ? r.value : APP_DEFAULTS[key]; }
 function setApp(key, value) { q.setApp.run(key, String(value ?? '')); }
@@ -275,9 +307,9 @@ const ENUMS = {
   reply_length: ['short', 'medium', 'long'], tone: ['friendly', 'professional', 'casual', 'funny', 'custom'],
   ai_mode: ['server', 'custom'], voice_engine: ['server', 'api'], call_provider: ['twilio'],
   act_email: ['off', 'me', 'anyone'], act_call: ['off', 'me', 'anyone'], act_whatsapp: ['off', 'me'],
-  act_reminder: ['off', 'me', 'anyone'], act_webhook: ['off', 'me', 'anyone'], act_note: ['off', 'me', 'anyone'], act_notify: ['off', 'anyone'],
+  act_reminder: ['off', 'me', 'anyone'], act_webhook: ['off', 'me', 'anyone'], act_note: ['off', 'me', 'anyone'], act_notify: ['off', 'anyone'], act_email_read: ['off', 'me'],
 };
-const NUM_LIMITS = { reply_delay: [0, 60], pause_minutes: [0, 10080], smtp_port: [1, 65535] };
+const NUM_LIMITS = { reply_delay: [0, 60], pause_minutes: [0, 10080], smtp_port: [1, 65535], imap_port: [1, 65535], context_messages: [0, 30] };
 
 function cleanOptions(input = {}) {
   const out = {};
@@ -336,7 +368,7 @@ function logEvent(sessionId, type, chatJid, summary) {
 
 function wipeSession(sessionId) {
   db.transaction(() => {
-    for (const t of ['messages', 'chats', 'events', 'reminders', 'notes', 'kb_docs', 'session_secrets', 'settings']) {
+    for (const t of ['messages', 'chats', 'events', 'reminders', 'notes', 'kb_docs', 'session_secrets', 'settings', 'emails', 'bot_emails']) {
       db.prepare(`DELETE FROM ${t} WHERE session_id = ?`).run(sessionId);
     }
     db.prepare('DELETE FROM kb_chunks WHERE session_id = ?').run(sessionId);

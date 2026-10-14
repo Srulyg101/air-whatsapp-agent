@@ -33,4 +33,7 @@ async function assertPublicUrl(raw) {
   if (!ok) throw new Error('That address is not allowed (private network)');
 }
 
-module.exports = { assertPublicUrl, isPrivateIp };
+/** Same check for a bare host name (SMTP / IMAP servers). */
+const assertPublicHost = (host) => assertPublicUrl(`https://${String(host || '').trim()}/`);
+
+module.exports = { assertPublicUrl, assertPublicHost, isPrivateIp };

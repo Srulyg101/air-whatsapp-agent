@@ -4,7 +4,7 @@ const pino = require('pino');
 const QRCode = require('qrcode');
 const baileys = require('@whiskeysockets/baileys');
 const config = require('./config');
-const { handleMessage } = require('./agent');
+const { handleMessage, extractContent } = require('./agent');
 const { logEvent } = require('./db');
 
 const makeWASocket = baileys.default;
@@ -35,6 +35,25 @@ class Session {
     this.handled = 0;
     this.lastError = null;
     this.groupCache = new Map(); // jid -> { name, at }
+    this.recent = new Map();     // jid -> last messages (RAM only), used as chat context for the AI
+  }
+
+  /** Remember the last messages of each chat in memory (never written to disk). */
+  remember(m) {
+    const jid = m.key?.remoteJid;
+    if (!jid || jid === 'status@broadcast' || jid.endsWith('@newsletter')) return null;
+    const c = extractContent(m);
+    const text = c.text || (c.audio ? '[voice note]' : c.document ? `[file: ${c.document.fileName || 'document'}]` : c.inner?.imageMessage ? '[photo]' : c.inner?.videoMessage ? '[video]' : c.inner?.stickerMessage ? '[sticker]' : '');
+    if (!text) return null;
+    const by = m.key.fromMe ? (this.sentIds.has(m.key.id) ? 'ai' : 'owner') : 'them';
+    const entry = { id: m.key.id, by, name: m.key.fromMe ? null : m.pushName || null, text: text.slice(0, 1500), ts: Number(m.messageTimestamp || Date.now() / 1000) };
+    const arr = this.recent.get(jid) || [];
+    if (arr.some((x) => x.id === entry.id)) return null;
+    arr.push(entry);
+    if (arr.length > 30) arr.splice(0, arr.length - 30);
+    this.recent.set(jid, arr);
+    if (this.recent.size > 2000) this.recent.delete(this.recent.keys().next().value);
+    return entry;
   }
 
   async groupName(jid) {
@@ -123,8 +142,10 @@ class Session {
         // Messages typed on the owner's own phone can arrive as 'append'; only handle fresh ones.
         const ts = Number(m.messageTimestamp || 0);
         if (type !== 'notify' && !(m.key?.fromMe && ts && Date.now() / 1000 - ts < 120)) continue;
+        const before = (this.recent.get(m.key?.remoteJid) || []).slice();
+        const entry = this.remember(m);
         try {
-          await handleMessage(m, { sessionId: this.id, isHouse: this.isHouse, sock, sentIds: this.sentIds, me: this.me, groupName: (j) => this.groupName(j) });
+          await handleMessage(m, { sessionId: this.id, isHouse: this.isHouse, sock, sentIds: this.sentIds, me: this.me, groupName: (j) => this.groupName(j), recent: before, entry });
           this.handled++;
         } catch (err) {
           console.error(`[${this.id}] handle error:`, err.message);
@@ -152,6 +173,7 @@ class Session {
     this.qr = null;
     this.me = null;
     this.groupCache.clear();
+    this.recent.clear();
   }
 
   info() {

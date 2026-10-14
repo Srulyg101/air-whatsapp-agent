@@ -4,6 +4,7 @@
 const crypto = require('crypto');
 const { q, getSecret, logEvent } = require('./db');
 const { assertPublicUrl } = require('./netguard');
+const email = require('./email');
 
 const digits = (s) => String(s || '').replace(/\D/g, '');
 function normPhone(s) {
@@ -37,9 +38,24 @@ function fmtTime(date, tz) {
 const DEFS = {
   send_email: {
     perm: 'act_email', confirm: true,
-    ready: (o, s) => !!(o.smtp_host && o.smtp_user && getSecret(s, 'smtp_pass')),
+    ready: (o, s) => email.canSend(s, o),
     schema: { description: 'Send an email.', parameters: { type: 'object', properties: { to: { type: 'string', description: 'Recipient email address' }, subject: { type: 'string' }, body: { type: 'string', description: 'Plain-text email body' } }, required: ['to', 'subject', 'body'] } },
     preview: (a) => `📧 *Send email*\nTo: ${a.to}\nSubject: ${a.subject}\n\n${a.body}`,
+  },
+  check_email: {
+    perm: 'act_email_read', confirm: false,
+    ready: (o, s) => !!(email.status(s).imap || email.botAddress(s)),
+    schema: { description: "List the newest emails in the assistant's inbox (or read one in full by id).", parameters: { type: 'object', properties: { email_id: { type: 'number', description: 'Optional: id of one email to read in full' } } } },
+  },
+  reply_email: {
+    perm: 'act_email_read', confirm: true,
+    ready: (o, s) => email.canSend(s, o) && !!(email.status(s).imap || email.botAddress(s)),
+    schema: { description: 'Reply to an email in the inbox by its id.', parameters: { type: 'object', properties: { email_id: { type: 'number' }, body: { type: 'string', description: 'Plain-text reply' } }, required: ['email_id', 'body'] } },
+    preview: (a, ctx) => { const m = q.email.get(Number(a.email_id), ctx.sessionId); return `📧 *Reply to email #${a.email_id}*
+To: ${m ? m.from_addr : '?'}
+Subject: Re: ${m ? m.subject : '?'}
+
+${a.body}`; },
   },
   make_phone_call: {
     perm: 'act_call', confirm: true,
@@ -118,18 +134,20 @@ async function execute(name, args, ctx) {
   const o = ctx.settings.options;
   const perm = o[d.perm];
   if (!perm || perm === 'off' || (perm === 'me' && !ctx.isOwner)) return 'This action is not allowed here.';
+  if (!d.ready(o, ctx.sessionId)) return `Error: ${name.replace(/_/g, ' ')} is not set up yet. Tell the user to set it up in the dashboard.`;
   const bad = validate(name, args);
   if (bad) return bad;
   if (ctx.dryRun) return `(test mode) Would run ${name}: ${JSON.stringify(args)}`;
   if (d.confirm && o.confirm_actions) {
     pending.set(`${ctx.sessionId}:${ctx.jid}:${ctx.isOwner ? 'owner' : ctx.sender || ''}`, { name, args, isOwner: !!ctx.isOwner, expires: Date.now() + 10 * 60_000 });
-    return { confirm: `${d.preview(args)}\n\nReply *yes* to go ahead or *no* to cancel.` };
+    return { confirm: `${d.preview(args, ctx)}\n\nReply *yes* to go ahead or *no* to cancel.` };
   }
   return run(name, args, ctx, false);
 }
 
 function validate(name, a) {
   if (name === 'send_email' && !/^\S+@\S+\.\S+$/.test(String(a.to || ''))) return 'Error: need a valid email address. Ask for it.';
+  if (name === 'reply_email' && !String(a.body || '').trim()) return 'Error: the reply is empty.';
   if ((name === 'make_phone_call' || name === 'send_whatsapp') && !normPhone(a.to)) return 'Error: need a full phone number with country code. Ask for it.';
   if ((name === 'make_phone_call' || name === 'send_whatsapp') && !String(a.message || '').trim()) return 'Error: message is empty.';
   return null;
@@ -140,10 +158,21 @@ async function run(name, a, ctx, viaConfirm) {
   try {
     let result;
     if (name === 'send_email') {
-      const nodemailer = require('nodemailer');
-      const t = nodemailer.createTransport({ host: o.smtp_host, port: Number(o.smtp_port) || 587, secure: !!o.smtp_secure || Number(o.smtp_port) === 465, auth: { user: o.smtp_user, pass: getSecret(ctx.sessionId, 'smtp_pass') } });
-      await t.sendMail({ from: o.smtp_from || o.smtp_user, to: a.to, subject: String(a.subject).slice(0, 300), text: String(a.body).slice(0, 20000) });
+      await email.send(ctx.sessionId, o, { to: a.to, subject: a.subject, text: a.body });
       result = `Email sent to ${a.to}.`;
+    } else if (name === 'check_email') {
+      if (a.email_id) {
+        const m = q.email.get(Number(a.email_id), ctx.sessionId);
+        return m ? `Email #${m.id} from ${m.from_name || ''} <${m.from_addr}>, subject "${m.subject}", ${new Date(m.date * 1000).toISOString().slice(0, 16)}:\n${m.text.slice(0, 4000)}` : 'No email with that id.';
+      }
+      const list = q.listEmails.all(ctx.sessionId, 10);
+      if (!list.length) return 'The inbox is empty.';
+      return 'Newest emails:\n' + list.map((m) => `#${m.id} · ${new Date(m.date * 1000).toISOString().slice(0, 16)} · from ${m.from_name || m.from_addr} · "${m.subject}" · ${m.snippet.replace(/\s+/g, ' ').slice(0, 160)}`).join('\n');
+    } else if (name === 'reply_email') {
+      const m = q.email.get(Number(a.email_id), ctx.sessionId);
+      if (!m) return 'No email with that id.';
+      await email.send(ctx.sessionId, o, { to: m.from_addr, subject: /^re:/i.test(m.subject) ? m.subject : `Re: ${m.subject}`, text: a.body, inReplyTo: m.message_id || undefined });
+      result = `Replied to ${m.from_addr}.`;
     } else if (name === 'make_phone_call') {
       const to = '+' + normPhone(a.to);
       const say = String(a.message).slice(0, 3000).replace(/[<>&]/g, ' ');
@@ -168,7 +197,7 @@ async function run(name, a, ctx, viaConfirm) {
       if (!due || isNaN(due)) return 'Error: I need a time for the reminder. Ask when.';
       if (due.getTime() < Date.now() - 60_000) return 'Error: that time is in the past. Ask for a future time.';
       // The owner's reminders go to their own "Message yourself" chat, not to whoever they were talking to.
-      const target = ctx.isOwner && ctx.ownerJid ? ctx.ownerJid : ctx.jid;
+      const target = ctx.isOwner && ctx.ownerJid && !ctx.isCommander ? ctx.ownerJid : ctx.jid;
       q.addReminder.run(ctx.sessionId, target, Math.floor(due.getTime() / 1000), String(a.text).slice(0, 1000));
       result = `Reminder set for ${fmtTime(due, o.timezone)}.`;
     } else if (name === 'save_note') {
@@ -219,6 +248,7 @@ function startScheduler(wa) {
 /** Owner-triggered test of a connector from the dashboard. */
 async function testConnector(kind, ctx, target) {
   if (kind === 'email') return run('send_email', { to: target, subject: 'Air Agent test email', body: 'Your Air Agent email is set up correctly.' }, ctx, false);
+  if (kind === 'imap') { const n = await email.checkImap(ctx.sessionId, null); return `Connected ✓ — ${n} new email(s) loaded.`; }
   if (kind === 'call') return run('make_phone_call', { to: target, message: 'Hello, this is a test call from your Air Agent.' }, ctx, false);
   if (kind === 'webhook') return run('trigger_webhook', { event: 'test', details: 'Test event from the Air Agent dashboard' }, ctx, false);
   return 'Unknown connector';

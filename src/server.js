@@ -15,6 +15,7 @@ const actions = require('./actions');
 const { think } = require('./agent');
 const wa = require('./wa');
 const { mask } = require('./secrets');
+const email = require('./email');
 
 const app = express();
 app.disable('x-powered-by');
@@ -29,7 +30,9 @@ app.use((req, res, next) => {
   });
   next();
 });
-app.use(express.json({ limit: '1mb' }));
+const jsonSmall = express.json({ limit: '1mb' });
+const jsonMail = express.json({ limit: '6mb' });
+app.use((req, res, next) => (req.path === '/api/inbound/email' ? jsonMail : jsonSmall)(req, res, next));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, '..', 'public'), { index: false }));
 
@@ -270,6 +273,106 @@ app.post('/api/actions/test', auth, wrap(async (req, res) => {
   res.json({ result: await actions.testConnector(kind, ctx, target) });
 }));
 
+// ---------- bot email ----------
+app.get('/api/email', auth, (req, res) => {
+  const id = sid(req);
+  res.json({ ...email.status(id), emails: q.listEmails.all(id, 50) });
+});
+app.get('/api/email/:id', auth, (req, res) => {
+  const m = q.email.get(Number(req.params.id), sid(req));
+  if (!m) return res.status(404).json({ error: 'Not found' });
+  res.json(m);
+});
+app.post('/api/email/claim', auth, wrap((req, res) => {
+  const id = sid(req);
+  if (!getApp('mail_domain')) throw bad('Bot email addresses are not set up on this server yet (Admin → Bot email domain).');
+  const local = String(req.body?.local || '').toLowerCase().trim();
+  if (!/^[a-z0-9][a-z0-9._-]{2,30}$/.test(local)) throw bad('Use 3–31 letters, numbers, dots, dashes or underscores.');
+  if (['admin', 'postmaster', 'abuse', 'root', 'support', 'noreply', 'no-reply', 'info', 'security', 'webmaster', 'hostmaster', 'mailer-daemon'].includes(local)) throw bad('That name is reserved.');
+  const taken = q.sessionOfEmail.get(local);
+  if (taken && taken.session_id !== id) throw bad('That address is taken. Try another.', 409);
+  q.releaseEmail.run(id);
+  q.claimEmail.run(local, id);
+  logEvent(id, 'info', null, `Bot email address set: ${local}@${getApp('mail_domain')}`);
+  res.json(email.status(id));
+}));
+app.post('/api/email/release', auth, (req, res) => { q.releaseEmail.run(sid(req)); res.json(email.status(sid(req))); });
+app.post('/api/email/check', auth, wrap(async (req, res) => {
+  const n = await email.checkImap(sid(req), wa);
+  res.json({ ok: true, added: n, ...email.status(sid(req)) });
+}));
+
+// Incoming mail for bot addresses (name@MAIL_DOMAIN). Called by your mail provider / Cloudflare Email Worker.
+app.post('/api/inbound/email', wrap(async (req, res) => {
+  const secret = req.get('x-inbound-secret') || req.query.secret;
+  const want = email.inboundSecret();
+  if (!secret || secret.length !== want.length || !crypto.timingSafeEqual(Buffer.from(String(secret)), Buffer.from(want))) throw bad('Forbidden', 403);
+  const b = { ...(req.body || {}) };
+  if (b.raw) { // raw RFC 822 message (e.g. from a Cloudflare Email Worker)
+    const { simpleParser } = require('mailparser');
+    const p = await simpleParser(String(b.raw).slice(0, 6_000_000));
+    b.from = b.from || p.from?.text; b.subject = b.subject ?? p.subject; b.text = b.text || p.text || ''; b.html = b.html || (p.html || '');
+    b.message_id = b.message_id || p.messageId; b.to = b.to || p.to?.text;
+  }
+  const domain = (getApp('mail_domain') || '').toLowerCase();
+  const tos = (Array.isArray(b.to) ? b.to : String(b.to || '').split(',')).map((x) => String(x).match(/[^<\s]+@[^>\s]+/)?.[0]?.toLowerCase()).filter(Boolean);
+  let delivered = 0;
+  for (const to of tos) {
+    const [local, dom] = to.split('@');
+    if (dom !== domain) continue;
+    const owner = q.sessionOfEmail.get(local);
+    if (!owner) continue;
+    const from = String(b.from || '');
+    const fromAddr = from.match(/[^<\s]+@[^>\s]+/)?.[0] || from;
+    const fromName = from.includes('<') ? from.split('<')[0].replace(/"/g, '').trim() : '';
+    const id = await email.receive(owner.session_id, {
+      source: 'inbound', uid: b.message_id || crypto.createHash('sha1').update(JSON.stringify([b.from, b.subject, b.text, b.date])).digest('hex'),
+      from_addr: fromAddr, from_name: fromName, to_addr: to, subject: b.subject, message_id: b.message_id,
+      text: b.text || (b.html ? String(b.html).replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/gi, ' ').replace(/<[^>]+>/g, ' ') : ''),
+    }, wa);
+    if (id) delivered++;
+  }
+  res.json({ ok: true, delivered });
+}));
+
+// ---------- one-click AI sign-in (OpenRouter OAuth, PKCE) ----------
+const oauthPending = new Map(); // nonce -> { sessionId, verifier, at }
+app.get('/api/ai/openrouter/start', auth, (req, res) => {
+  if (getApp('allow_custom_ai') !== '1') return res.status(403).json({ error: 'The admin has disabled custom AI providers' });
+  const verifier = crypto.randomBytes(48).toString('base64url');
+  const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+  const nonce = crypto.randomBytes(16).toString('hex');
+  for (const [k, v] of oauthPending) if (Date.now() - v.at > 15 * 60_000) oauthPending.delete(k);
+  oauthPending.set(nonce, { sessionId: sid(req), userId: req.user.id, verifier, at: Date.now() });
+  const callback = `${req.protocol}://${req.get('host')}/ai/openrouter/callback?n=${nonce}`;
+  res.json({ url: `https://openrouter.ai/auth?callback_url=${encodeURIComponent(callback)}&code_challenge=${challenge}&code_challenge_method=S256` });
+});
+app.get('/ai/openrouter/callback', auth, async (req, res) => {
+  const p = oauthPending.get(String(req.query.n || ''));
+  oauthPending.delete(String(req.query.n || ''));
+  const back = (msg) => res.redirect(`/#/model?${msg}`);
+  if (!p || p.userId !== req.user.id || !req.query.code) return back('signin=failed');
+  try {
+    const r = await fetch('https://openrouter.ai/api/v1/auth/keys', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: String(req.query.code), code_verifier: p.verifier, code_challenge_method: 'S256' }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.key) throw new Error(d.error?.message || `HTTP ${r.status}`);
+    const cur = getSettings(p.sessionId).options;
+    saveSettings(p.sessionId, {
+      options: { ai_mode: 'custom', ai_base_url: 'https://openrouter.ai/api/v1', ai_model: cur.ai_base_url === 'https://openrouter.ai/api/v1' && cur.ai_model ? cur.ai_model : 'openai/gpt-4o-mini' },
+      secrets: { ai_key: d.key },
+    });
+    logEvent(p.sessionId, 'info', null, 'Signed in to OpenRouter — smarter AI connected');
+    back('signin=ok');
+  } catch (e) {
+    console.error('OpenRouter sign-in failed:', e.message);
+    back('signin=failed');
+  }
+});
+
 // ---------- admin ----------
 async function snapshot() {
   const mem = process.memoryUsage();
@@ -299,6 +402,9 @@ app.get('/api/admin/settings', auth, admin, (req, res) => res.json({
   ai_base_url: getApp('ai_base_url'), ai_model: getApp('ai_model') || config.model, ai_key: mask(getAppSecret('ai_key')),
   voice_api_base: getApp('voice_api_base'), voice_api_model: getApp('voice_api_model'), voice_api_key: mask(getAppSecret('voice_api_key')),
   local_default_model: config.model, ollama_url: config.ollamaUrl, pulls: ai.pulls,
+  mail_domain: getApp('mail_domain'), bot_smtp_host: getApp('bot_smtp_host'), bot_smtp_port: getApp('bot_smtp_port'), bot_smtp_user: getApp('bot_smtp_user'),
+  bot_smtp_pass: mask(getAppSecret('bot_smtp_pass')), inbound_secret: email.inboundSecret(),
+  inbound_url: `${req.protocol}://${req.get('host')}/api/inbound/email`,
 }));
 app.post('/api/admin/settings', auth, admin, wrap((req, res) => {
   const b = req.body || {};
@@ -309,8 +415,14 @@ app.post('/api/admin/settings', auth, admin, wrap((req, res) => {
     if (v && !/^https?:\/\//.test(v)) throw bad(`${k} must start with http(s)://`);
     setApp(k, v.replace(/\/$/, ''));
   }
-  for (const k of ['ai_model', 'voice_api_model']) if (k in b) setApp(k, String(b[k] || '').trim().slice(0, 200));
-  for (const k of ['ai_key', 'voice_api_key']) if (k in b && !String(b[k]).startsWith('••••')) setAppSecret(k, String(b[k] || '').trim());
+  for (const k of ['ai_model', 'voice_api_model', 'bot_smtp_host', 'bot_smtp_user']) if (k in b) setApp(k, String(b[k] || '').trim().slice(0, 200));
+  if ('bot_smtp_port' in b) setApp('bot_smtp_port', String(Number(b.bot_smtp_port) || 587));
+  if ('mail_domain' in b) {
+    const d = String(b.mail_domain || '').trim().toLowerCase();
+    if (d && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d)) throw bad('Mail domain looks wrong (e.g. bots.yourdomain.com)');
+    setApp('mail_domain', d);
+  }
+  for (const k of ['ai_key', 'voice_api_key', 'bot_smtp_pass']) if (k in b && !String(b[k]).startsWith('••••')) setAppSecret(k, String(b[k] || '').trim());
   res.json({ ok: true });
 }));
 app.post('/api/admin/pull', auth, admin, (req, res) => {
@@ -391,6 +503,7 @@ if (require.main === module) {
     console.log(`${config.botName} v${config.version} running on :${config.port} | AI ${getApp('ai_base_url') || config.ollamaUrl} model ${getApp('ai_model') || config.model}`);
     wa.restoreAll();
     actions.startScheduler(wa);
+    email.startPoller(wa);
   });
   for (const sig of ['SIGINT', 'SIGTERM']) {
     process.on(sig, async () => {
