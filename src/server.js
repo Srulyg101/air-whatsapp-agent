@@ -504,6 +504,7 @@ if (require.main === module) {
     wa.restoreAll();
     actions.startScheduler(wa);
     email.startPoller(wa);
+    require('./autoupdate').start(() => process.kill(process.pid, 'SIGTERM'));
   });
   for (const sig of ['SIGINT', 'SIGTERM']) {
     process.on(sig, async () => {
