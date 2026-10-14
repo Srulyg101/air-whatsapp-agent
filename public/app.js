@@ -791,6 +791,22 @@ const PRESETS = [
   ['anthropic', 'Anthropic Claude', 'https://api.anthropic.com/v1', 'claude-sonnet-5-5'],
   ['custom', 'Other OpenAI-compatible API', '', ''],
 ];
+async function refreshOpenRouterModels() {
+  const result = await api('/api/ai/models' + tq());
+  const select = $('#orModelChoice');
+  if (select) {
+    const current = o().ai_model;
+    const ids = [...new Set([current, ...result.models].filter(Boolean))];
+    select.innerHTML = '<option value="">Choose a model…</option>' + ids.map((id) =>
+      `<option value="${esc(id)}" ${id === current ? 'selected' : ''}>${esc(id)}</option>`).join('');
+  }
+  const status = $('#orModelStatus');
+  if (status) status.textContent = `${result.models.length} models available. Choose one above, then save and test it.`;
+  const datalist = $('#modelList');
+  if (datalist) datalist.innerHTML = result.models.map((id) => `<option value="${esc(id)}">`).join('');
+  return result;
+}
+
 const OR_BASE = 'https://openrouter.ai/api/v1';
 const OR_MODELS = [
   ['openai/gpt-4o-mini', 'ChatGPT · GPT-4o mini', 'Fast, cheap, great for most chats'],
@@ -813,6 +829,9 @@ PAGES.model = {
     ${onOR ? card('Smarter AI', 'Connected through OpenRouter. Pick the model you like — you can switch anytime.', `
         <div class="row between" style="margin-bottom:14px">${pill('ok', 'Signed in')}<div class="row"><button class="btn ghost sm" data-act="orSignin" data-busy="Opening…">Sign in again</button><button class="btn danger sm" data-act="orOff">Use server AI instead</button></div></div>
         ${cards('ai_model', OR_MODELS.map(([id, t, d]) => [id, t, d]).concat(known ? [] : [[op.ai_model, op.ai_model || 'Other model', 'Your custom choice']]))}
+        <div class="field" style="margin-top:14px"><label class="lbl">Choose from all OpenRouter models</label>
+          <select id="orModelChoice"><option value="">Loading models…</option></select>
+          <div class="hint" id="orModelStatus">Loading your available OpenRouter models…</div></div>
         <details style="margin-top:12px"><summary>Use another model</summary>${txt('ai_model', 'Model id', 'provider/model-name', 'Any model listed on openrouter.ai/models')}</details>`)
       : card('', '', `
         <div class="signin"><div class="big">✨</div><div class="grow"><h2 style="font-size:18px">Make your assistant much smarter — one click</h2>
@@ -843,8 +862,16 @@ PAGES.model = {
       if (p[2]) o().ai_base_url = p[2]; if (p[3]) o().ai_model = p[3];
       o().ai_mode = 'custom'; markDirty(true); rerender();
     });
+    $('#orModelChoice')?.addEventListener('change', (e) => {
+      if (!e.target.value) return;
+      o().ai_model = e.target.value; markDirty(true); rerender();
+    });
+    if ($('#orModelChoice')) refreshOpenRouterModels().catch((e) => {
+      const status = $('#orModelStatus'); if (status) status.textContent = 'Could not load models: ' + e.message;
+    });
   },
   acts: {
+    refreshORModels: (b) => busy(b, async () => { await refreshOpenRouterModels(); toast('OpenRouter models refreshed'); }),
     orSignin: (b) => busy(b, async () => {
       if (S.dirty) throw new Error('Save or discard your changes first');
       const r = await api('/api/ai/openrouter/start' + tq());
@@ -873,6 +900,7 @@ PAGES.model = {
       const r = await api('/api/ai/test' + tq(), { body: { mode: op.ai_mode, base_url: op.ai_base_url, model: op.ai_model, api_key: S.secretsDraft.ai_key ?? S.settings.secrets.ai_key } });
       $('#aiOut').innerHTML = `<div class="banner ok"><div class="bi">✅</div><div><b>${esc(r.model)}</b> answered in ${(r.ms / 1000).toFixed(1)}s: "${esc(r.reply)}"${r.models?.length ? `<div class="small muted" style="margin-top:4px">${r.models.length} models available</div>` : ''}</div></div>`;
       const dl = $('#modelList'); if (dl) dl.innerHTML = (r.models || []).map((m) => `<option value="${esc(m)}">`).join('');
+      if (op.ai_base_url === OR_BASE) await refreshOpenRouterModels();
     }),
   },
 };
