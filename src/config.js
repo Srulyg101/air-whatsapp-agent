@@ -21,4 +21,9 @@ module.exports = {
   // Delete chat history older than N days (0 = keep forever)
   retentionDays: Number(env('RETENTION_DAYS', 30)),
   cookieSecure: env('COOKIE_SECURE', 'true') === 'true',
+  mailDomain: env('MAIL_DOMAIN', ''),
+  emailFrom: env('EMAIL_FROM', ''),
+  resendApiKey: env('RESEND_API_KEY', ''),
+  inboundEmailWebhookSecret: env('INBOUND_EMAIL_WEBHOOK_SECRET', ''),
+
 };
