@@ -71,14 +71,17 @@ function verifyInbound(rawBody, timestamp, signature) {
 function ingest(payload) {
   // A mail provider/forwarder must POST a normalized JSON envelope here after
   // validating the original provider signature and relaying with the Air HMAC.
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
   const to = cleanEmail(Array.isArray(payload.to) ? payload.to[0] : payload.to);
   const row = q.mailboxByAlias.get(to);
   if (!row) return false;
   const from = cleanEmail(payload.from).slice(0, 250);
   if (!validEmail(from)) return false;
-  q.addBotEmail.run(row.session_id, from, to,
-    String(payload.subject || '').slice(0, 250),
-    String(payload.text || '').slice(0, 50000));
+  const subject = String(payload.subject || '').slice(0, 250);
+  const body = String(payload.text || '').slice(0, 50000);
+  const providerId = String(payload.messageId || payload.id || '').trim().slice(0, 128) ||
+    crypto.createHash('sha256').update([from,to,subject,body].join('\\u0000')).digest('hex');
+  q.addBotEmail.run(row.session_id, from, to, subject, body, providerId);
   return true;
 }
 
