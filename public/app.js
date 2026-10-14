@@ -819,6 +819,7 @@ PAGES.model = {
           <p class="muted" style="margin:4px 0 0">Sign in with Google or email and choose ChatGPT, Claude, Llama and more. No API keys to copy. Pay only for what you use on your OpenRouter account.</p></div>
           <button class="btn lg" data-act="orSignin" data-busy="Opening…">Sign in & connect</button></div>
         <p class="small faint" style="margin:12px 0 0">Your assistant can't use a personal ChatGPT or Claude chat subscription — those services don't allow it — so this connects through OpenRouter instead.</p>`)}
+    <div id="orQr"></div>
 
     ${card('Which AI answers', '', cards('ai_mode', [
       ['server', 'Server AI (free)', 'Open-source model running on this server. Private, but less smart.', '🖥️'],
@@ -846,7 +847,24 @@ PAGES.model = {
     orSignin: (b) => busy(b, async () => {
       if (S.dirty) throw new Error('Save or discard your changes first');
       const r = await api('/api/ai/openrouter/start' + tq());
-      location.href = r.url;
+      const box = $('#orQr'); if (!box) { location.href = r.url; return; }
+      box.innerHTML = card('Scan to sign in', 'Point your phone camera at this code and sign in to OpenRouter there. This page updates by itself when you are done.', `
+        <div class="row" style="gap:20px;align-items:center;flex-wrap:wrap">
+          <img src="${r.qr}" alt="OpenRouter sign-in QR code" width="220" height="220" style="border-radius:8px;background:#fff;padding:6px">
+          <div class="grow"><p class="muted" id="orQrSt"><span class="spin"></span> Waiting for you to sign in…</p>
+            <a class="btn ghost" href="${esc(r.url)}">Or sign in on this device</a></div></div>`);
+      clearInterval(S.orPoll);
+      const t0 = Date.now();
+      S.orPoll = setInterval(async () => {
+        if (!$('#orQrSt') || Date.now() - t0 > 15 * 60_000) { clearInterval(S.orPoll); return; }
+        const st = await api('/api/ai/openrouter/status?state=' + encodeURIComponent(r.state)).catch(() => null);
+        if (!st) return;
+        if (st.done) {
+          clearInterval(S.orPoll);
+          if (st.ok) { await loadSettings(); rerender(); toast('Signed in ✓ — your smarter AI is connected'); }
+          else $('#orQrSt').textContent = 'Sign-in failed. Try again.';
+        } else if (st.expired) { clearInterval(S.orPoll); $('#orQrSt').textContent = 'This code expired. Click Sign in again.'; }
+      }, 2500);
     }),
     orOff: () => { o().ai_mode = 'server'; markDirty(true); rerender(); },
     testAi: (b) => busy(b, async () => {
