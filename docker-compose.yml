@@ -14,9 +14,11 @@ services:
       - -c
       - |
         set -e
-        if [ -d /srv/app/.git ]; then git -C /srv/app pull --ff-only || true;
-        else git clone --depth 1 ${REPO_URL:-https://github.com/Srulyg101/air-whatsapp-agent.git} /srv/app; fi
-        cd /srv/app && npm install --omit=dev --no-audit --no-fund && exec node src/server.js
+        # Never auto-pull on container restart: deploy a reviewed commit explicitly.
+        if [ ! -d /srv/app/.git ]; then
+          git clone --depth 1 ${REPO_URL:-https://github.com/Srulyg101/air-whatsapp-agent.git} /srv/app
+        fi
+        cd /srv/app && npm ci --omit=dev --no-audit --no-fund && exec node src/server.js
     environment:
       - BOT_NAME=${BOT_NAME:-Air Agent}
       - MODEL=${MODEL:-qwen2.5:1.5b}
