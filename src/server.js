@@ -344,14 +344,28 @@ app.get('/api/ai/openrouter/start', auth, (req, res) => {
   const nonce = crypto.randomBytes(16).toString('hex');
   for (const [k, v] of oauthPending) if (Date.now() - v.at > 15 * 60_000) oauthPending.delete(k);
   oauthPending.set(nonce, { sessionId: sid(req), userId: req.user.id, verifier, at: Date.now() });
-  const callback = `${req.protocol}://${req.get('host')}/ai/openrouter/callback?n=${nonce}`;
-  res.json({ url: `https://openrouter.ai/auth?callback_url=${encodeURIComponent(callback)}&code_challenge=${challenge}&code_challenge_method=S256` });
+  let host = '';
+  try { host = new URL(`${req.protocol}://${req.get('host')}`).hostname.toLowerCase(); } catch {}
+  const isLoopback = ['localhost', '127.0.0.1', '::1'].includes(host);
+  if (req.protocol !== 'https' && !isLoopback) {
+    oauthPending.delete(nonce);
+    return res.status(400).json({ error: 'OpenRouter sign-in requires HTTPS. Open Air Agent through your HTTPS domain, then try again.' });
+  }
+  const callback = `${req.protocol}://${req.get('host')}/ai/openrouter/callback`;
+  const authUrl = new URL('https://openrouter.ai/auth');
+  authUrl.searchParams.set('callback_url', callback);
+  authUrl.searchParams.set('state', nonce);
+  authUrl.searchParams.set('code_challenge', challenge);
+  authUrl.searchParams.set('code_challenge_method', 'S256');
+  authUrl.searchParams.set('key_label', 'Air Agent');
+  res.json({ url: authUrl.toString() });
 });
 app.get('/ai/openrouter/callback', auth, async (req, res) => {
-  const p = oauthPending.get(String(req.query.n || ''));
-  oauthPending.delete(String(req.query.n || ''));
+  const state = String(req.query.state || '');
+  const p = oauthPending.get(state);
+  oauthPending.delete(state);
   const back = (msg) => res.redirect(`/#/model?${msg}`);
-  if (!p || p.userId !== req.user.id || !req.query.code) return back('signin=failed');
+  if (!p || p.userId !== req.user.id || p.sessionId !== sid(req) || !req.query.code) return back('signin=failed');
   try {
     const r = await fetch('https://openrouter.ai/api/v1/auth/keys', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

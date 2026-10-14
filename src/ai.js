@@ -31,7 +31,9 @@ async function chat(messages, { provider, tools, temperature = 0.6, timeoutMs = 
     if (p.label === 'custom') await assertPublicUrl(p.base);
     const out = isLocal(p.base) && p.label !== 'custom'
       ? await ollamaChat(p, messages, tools, temperature, timeoutMs)
-      : await openaiChat(p, messages, tools, temperature, timeoutMs);
+      : isAnthropic(p.base)
+        ? await anthropicChat(p, messages, tools, temperature, timeoutMs)
+        : await openaiChat(p, messages, tools, temperature, timeoutMs);
     stats.totalMs += Date.now() - started;
     return out;
   } catch (err) {
@@ -64,6 +66,68 @@ async function ollamaChat(p, messages, tools, temperature, timeoutMs) {
   return {
     content: (m.content || '').trim(),
     toolCalls: (m.tool_calls || []).map((t, i) => ({ id: `call_${Date.now()}_${i}`, name: t.function?.name, args: safeJson(t.function?.arguments) })),
+  };
+}
+
+function isAnthropic(base) {
+  return String(base || '').replace(/\/$/, '') === 'https://api.anthropic.com/v1';
+}
+
+function toAnthropicMessages(messages) {
+  let system = '';
+  const out = [];
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role === 'system') { system += (system ? String.fromCharCode(10, 10) : '') + String(m.content || ''); continue; }
+    if (m.role === 'tool') {
+      const blocks = [];
+      while (i < messages.length && messages[i].role === 'tool') {
+        const tool = messages[i++];
+        blocks.push({ type: 'tool_result', tool_use_id: tool.tool_call_id, content: String(tool.content || '') });
+      }
+      i--;
+      out.push({ role: 'user', content: blocks });
+      continue;
+    }
+    if (m.role === 'assistant' && m.tool_calls?.length) {
+      const content = [];
+      if (m.content) content.push({ type: 'text', text: String(m.content) });
+      for (const call of m.tool_calls) {
+        const fn = call.function || {};
+        content.push({ type: 'tool_use', id: call.id, name: fn.name, input: safeJson(fn.arguments) });
+      }
+      out.push({ role: 'assistant', content });
+      continue;
+    }
+    out.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') });
+  }
+  return { system, messages: out };
+}
+
+async function anthropicChat(p, messages, tools, temperature, timeoutMs) {
+  const converted = toAnthropicMessages(messages);
+  const body = { model: p.model, max_tokens: 2048, messages: converted.messages, temperature };
+  if (converted.system) body.system = converted.system;
+  if (tools?.length) body.tools = tools.map((t) => ({
+    name: t.function.name,
+    description: t.function.description || '',
+    input_schema: t.function.parameters || { type: 'object', properties: {} },
+  }));
+  const res = await fetch(`${p.base}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': p.key || '', 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) {
+    const t = (await res.text()).slice(0, 300);
+    throw new Error(`Claude API error ${res.status}: ${t}`);
+  }
+  const data = await res.json();
+  const blocks = data.content || [];
+  return {
+    content: blocks.filter((b) => b.type === 'text').map((b) => b.text || '').join(String.fromCharCode(10)).trim(),
+    toolCalls: blocks.filter((b) => b.type === 'tool_use').map((b) => ({ id: b.id, name: b.name, args: b.input || {} })),
   };
 }
 
@@ -103,7 +167,10 @@ async function listModels(p) {
     const data = await res.json();
     return (data.models || []).map((m) => m.name);
   }
-  const res = await fetch(`${p.base}/models`, { headers: p.key ? { Authorization: `Bearer ${p.key}` } : {}, signal: AbortSignal.timeout(10_000) });
+  const headers = isAnthropic(p.base)
+    ? { 'x-api-key': p.key || '', 'anthropic-version': '2023-06-01' }
+    : (p.key ? { Authorization: `Bearer ${p.key}` } : {});
+  const res = await fetch(`${p.base}/models`, { headers, signal: AbortSignal.timeout(10_000) });
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data = await res.json();
   return (data.data || data.models || []).map((m) => m.id || m.name).filter(Boolean).slice(0, 300);

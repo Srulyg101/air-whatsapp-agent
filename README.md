@@ -17,7 +17,7 @@ and gets things done. Open-source AI by default, runs on your own server.
   (Twilio for now), send WhatsApp messages, set reminders, save notes/leads, notify you when someone needs
   a person, and trigger webhooks (Zapier, Make, n8n, CRM). Risky actions ask "yes / no" first.
 - **Smarter AI in one click** — server model by default (Ollama), or *Sign in & connect* through OpenRouter
-  (ChatGPT, Claude, Llama, Qwen, DeepSeek) with no API keys to copy. Any OpenAI-compatible key also works.
+  (ChatGPT, Claude, Llama, Qwen, DeepSeek) with no API keys to copy. Use an OpenAI API key for GPT, or an Anthropic API key for Claude. OpenRouter sign-in can also connect you to GPT, Claude, and other models. ChatGPT or Claude consumer subscriptions are not API credentials.
 - **Bot email** — connect any mailbox (IMAP) or claim `name@yourdomain`; WhatsApp alerts for new mail, and the AI can read and reply.
 - **Command numbers** — your other phones or trusted people can command the AI as if they were you.
 - **Chat context** — reads the last messages of the chat (in memory only) so replies fit the conversation.
@@ -48,7 +48,7 @@ git clone https://github.com/Srulyg101/air-whatsapp-agent.git air-agent && cd ai
 sudo bash install.sh
 ```
 
-Then open `http://YOUR_SERVER_IP:8080` and create the first account (it becomes admin).
+Then open `http://YOUR_SERVER_IP:8080` and create the first account (it becomes admin). OpenRouter sign-in requires a public HTTPS domain (except localhost); configure HTTPS before using that button.
 
 ## Updating
 
@@ -88,6 +88,10 @@ export default {
 
    Set `WEBHOOK_URL` and `SECRET` as Worker variables, then add a **catch-all** routing rule → this Worker.
 3. For sending from those addresses, add SMTP for the domain (Resend, Mailgun, Brevo, SES…) on the same Admin card.
+
+## WeChat integration status
+
+WeChat is not connected yet. See [WeChat integration requirements](docs/wechat-integration-requirements.md) for the supported account types and access required before a compliant integration can be built.
 
 ## Notes
 
