@@ -48,7 +48,7 @@ git clone https://github.com/Srulyg101/air-whatsapp-agent.git air-agent && cd ai
 sudo bash install.sh
 ```
 
-Then open `http://YOUR_SERVER_IP:8080` and create the first account (it becomes admin).
+Then open `http://YOUR_SERVER_IP:8080` and create the first account (it becomes admin). OpenRouter sign-in requires a public HTTPS domain (except localhost); configure HTTPS before using that button.
 
 ## Updating
 
