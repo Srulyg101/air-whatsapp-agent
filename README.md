@@ -17,7 +17,7 @@ and gets things done. Open-source AI by default, runs on your own server.
   (Twilio for now), send WhatsApp messages, set reminders, save notes/leads, notify you when someone needs
   a person, and trigger webhooks (Zapier, Make, n8n, CRM). Risky actions ask "yes / no" first.
 - **Smarter AI in one click** — server model by default (Ollama), or *Sign in & connect* through OpenRouter
-  (ChatGPT, Claude, Llama, Qwen, DeepSeek) with no API keys to copy. Any OpenAI-compatible key also works.
+  (ChatGPT, Claude, Llama, Qwen, DeepSeek) with no API keys to copy. Use an OpenAI API key for GPT, or an Anthropic API key for Claude. OpenRouter sign-in can also connect you to GPT, Claude, and other models. ChatGPT or Claude consumer subscriptions are not API credentials.
 - **Bot email** — connect any mailbox (IMAP) or claim `name@yourdomain`; WhatsApp alerts for new mail, and the AI can read and reply.
 - **Command numbers** — your other phones or trusted people can command the AI as if they were you.
 - **Chat context** — reads the last messages of the chat (in memory only) so replies fit the conversation.
