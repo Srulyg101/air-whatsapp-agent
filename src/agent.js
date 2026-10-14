@@ -3,6 +3,7 @@ const config = require('./config');
 const ai = require('./ai');
 const { q, getSettings } = require('./db');
 const { approvedSender, blockedSender, maskedPeer } = require('./security');
+const { handleControl } = require('./controller');
 
 const HELP = `*${config.botName}* — your AI on WhatsApp\n\n` +
   `Just send a message and I'll reply.\n\n` +
@@ -77,6 +78,7 @@ function inQuietHours(o) {
   return a <= b ? n >= a && n < b : n >= a || n < b;
 }
 const awaySent = new Map(); // chat -> timestamp of last away message
+const pendingReplies = new Set(); // avoid double response if two messages arrive together
 
 /**
  * Decide whether to answer a message and, if so, generate + send a reply.
@@ -94,6 +96,8 @@ async function handleMessage(m, ctx) {
 
   const settings = getSettings(sessionId);
   const o = settings.options;
+  // Reserved privileged commands must never be handled by the general AI.
+  if (await handleControl(m, { sock, sessionId, isHouse, isActive })) return;
   if (!settings.enabled) return;
 
   const group = isJidGroup(jid);
@@ -102,21 +106,46 @@ async function handleMessage(m, ctx) {
   const isSelfChat = !group && chatIds.some((c) => mine.includes(c));
   console.log(`[${sessionId}] msg fromMe=${!!m.key.fromMe} group=${!!group} peer=${maskedPeer(m)} len=${text.length}`);
 
+  // Opt-in: retain only messages observed since context was enabled.
+  // Never store controller commands or their PIN.
+  const contextOn = !!o.context_enabled && !group && !isHouse && !!m.key.id &&
+    !text.toLowerCase().startsWith('/do ');
+  let observedHistory = [];
+  if (contextOn) {
+    observedHistory = q.recentObserved.all(sessionId, jid, String(m.key.id),
+      Math.max(0, Math.min(10, Number(o.context_limit) || 10)));
+    q.addObserved.run(sessionId, jid, String(m.key.id),
+      m.key.fromMe ? 'assistant' : 'user', text.slice(0, 2000));
+    q.trimObserved.run(sessionId, jid, sessionId, jid, 10);
+  }
+
   let replyAction = 'command';
   const send = async (body) => {
     if (!isActive()) return;
     // Re-evaluate permissions AFTER slow AI generation and delay.
     const fresh = getSettings(sessionId);
-    if (!fresh.enabled) return;
+    if (!fresh.enabled) return false;
     if (!m.key.fromMe) {
-      if (blockedSender(m, fresh.options.block_list)) return;
+      if (blockedSender(m, fresh.options.block_list)) return false;
       if (!isHouse && (!approvedSender(m, fresh.options.allow_list) ||
-        (group ? !fresh.reply_groups : !fresh.auto_reply))) return;
+        (group ? !fresh.reply_groups : !fresh.auto_reply))) return false;
+      const receipt = !isHouse && !group ? q.hasReceipt.get(sessionId, jid) : null;
+      if (receipt && fresh.options.reply_once && !isHouse && !group) return false;
+      if (receipt && Number(fresh.options.cooldown_minutes) > 0 &&
+          Date.now() - receipt.last_reply_at * 1000 < Number(fresh.options.cooldown_minutes) * 60000) return false;
     }
     try {
       const sent = await sock.sendMessage(jid, { text: body }, o.quote_reply ? { quoted: m } : undefined);
-      if (sent?.key?.id) sentIds.add(sent.key.id);
+      if (sent?.key?.id) {
+        sentIds.add(sent.key.id);
+        if (!m.key.fromMe && !isHouse && !group) q.recordReceipt.run(sessionId, jid);
+        if (contextOn) {
+          q.addObserved.run(sessionId, jid, String(sent.key.id), 'assistant', body.slice(0, 2000));
+          q.trimObserved.run(sessionId, jid, sessionId, jid, 10);
+        }
+      }
       q.addReplyAudit.run(sessionId, maskedPeer(m), replyAction, sent?.key?.id ? 'submitted' : 'unconfirmed');
+      return !!sent?.key?.id;
     } catch (err) {
       q.addReplyAudit.run(sessionId, maskedPeer(m), replyAction, 'send_error');
       throw err;
@@ -153,6 +182,16 @@ async function handleMessage(m, ctx) {
     shouldReply = !!settings.auto_reply; // personal number answering contacts
   }
   if (!shouldReply) return;
+  if (!m.key.fromMe && !isHouse && !group) {
+    const receipt = q.hasReceipt.get(sessionId, jid);
+    if (receipt && o.reply_once) return;
+    if (receipt && Number(o.cooldown_minutes) > 0 &&
+        Date.now() - receipt.last_reply_at * 1000 < Number(o.cooldown_minutes) * 60000) return;
+  }
+  const lockKey = sessionId + ':' + jid;
+  if (pendingReplies.has(lockKey)) return;
+  pendingReplies.add(lockKey);
+  try {
   replyAction = 'ai';
   if (!m.key.fromMe && o.prefix_on && o.prefix_text) prefix = o.prefix_text.trim() + ' ';
 
@@ -174,7 +213,8 @@ async function handleMessage(m, ctx) {
 
   if (o.typing) { try { await sock.sendPresenceUpdate('composing', jid); } catch (_) {} }
 
-  const history = o.memory ? q.history.all(sessionId, jid, config.historyTurns * 2) : [];
+  const history = contextOn ? observedHistory :
+    (o.memory ? q.history.all(sessionId, jid, config.historyTurns * 2) : []);
   const messages = [{ role: 'system', content: buildSystemPrompt(settings) }, ...history, { role: 'user', content: prompt }];
 
   let reply;
@@ -189,13 +229,16 @@ async function handleMessage(m, ctx) {
   if (!o.use_emojis) reply = reply.replace(EMOJI_RE, '').replace(/[ \t]{2,}/g, ' ').trim();
   if (!reply) reply = '...';
 
-  if (o.memory) {
+  if (o.reply_delay > 0) await new Promise((r) => setTimeout(r, o.reply_delay * 1000));
+  if (o.typing) { try { await sock.sendPresenceUpdate('paused', jid); } catch (_) {} }
+  const didSend = await send(prefix + reply);
+  if (didSend && o.memory) {
     q.addMsg.run(sessionId, jid, 'user', prompt);
     q.addMsg.run(sessionId, jid, 'assistant', reply);
   }
-  if (o.reply_delay > 0) await new Promise((r) => setTimeout(r, o.reply_delay * 1000));
-  if (o.typing) { try { await sock.sendPresenceUpdate('paused', jid); } catch (_) {} }
-  await send(prefix + reply);
+  } finally {
+    pendingReplies.delete(lockKey);
+  }
 }
 
 module.exports = { handleMessage, extractText };
