@@ -30,6 +30,8 @@ services:
       - OLLAMA_URL=http://ollama:11434
       - DATA_DIR=/data
       - PORT=3000
+      # Changes on every GitHub deploy so the app container restarts and pulls the new code
+      - DEPLOY_SHA=${DEPLOY_SHA:-initial}
     ports:
       - "${PUBLIC_PORT:-8080}:3000"
     volumes:
