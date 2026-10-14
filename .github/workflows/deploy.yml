@@ -11,6 +11,9 @@ concurrency:
 
 jobs:
   deploy:
+    # Skipped until HOSTINGER_VM_ID is set (Settings > Secrets and variables > Actions).
+    # Without it, the server still updates itself from GitHub within a few minutes (src/autoupdate.js).
+    if: ${{ vars.HOSTINGER_VM_ID != '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
