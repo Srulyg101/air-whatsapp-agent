@@ -6,6 +6,7 @@ const cookieParser = require('cookie-parser');
 const bcrypt = require('bcryptjs');
 const config = require('./config');
 const { q, getSettings, cleanOptions } = require('./db');
+const { hasApprovedNumbers } = require('./security');
 const ai = require('./ai');
 const wa = require('./wa');
 
@@ -18,9 +19,15 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 const started = Date.now();
 const sessionIdFor = (user) => `u${user.id}`;
 
+// Bearer tokens are one-way hashed in SQLite, protecting browser sessions if the DB is copied.
+const tokenHash = (token) => 'sha256:' + crypto.createHash('sha256').update(String(token)).digest('hex');
+const constantTimeMatch = (a, b) => crypto.timingSafeEqual(
+  crypto.createHash('sha256').update(String(a)).digest(),
+  crypto.createHash('sha256').update(String(b)).digest());
+
 // ---------- auth ----------
 function auth(req, res, next) {
-  const user = req.cookies.token && q.userByToken.get(req.cookies.token);
+  const user = req.cookies.token && q.userByToken.get(tokenHash(req.cookies.token));
   if (!user) return res.status(401).json({ error: 'Not logged in' });
   req.user = user;
   next();
@@ -29,8 +36,8 @@ const admin = (req, res, next) => (req.user.is_admin ? next() : res.status(403).
 
 function login(res, userId) {
   const token = crypto.randomBytes(32).toString('hex');
-  q.insertToken.run(token, userId);
-  res.cookie('token', token, { httpOnly: true, sameSite: 'lax', secure: config.cookieSecure, maxAge: 1000 * 60 * 60 * 24 * 90 });
+  q.insertToken.run(tokenHash(token), userId);
+  res.cookie('token', token, { httpOnly: true, sameSite: 'strict', secure: config.cookieSecure, maxAge: 1000 * 60 * 60 * 24 * 7 });
 }
 
 const tries = new Map();
@@ -41,10 +48,21 @@ function slowDown(req, res, next) {
   arr.push(now); tries.set(k, arr); next();
 }
 
+// Bootstrap requires a strong setup token set privately on the server, not just being first.
+app.get('/api/auth/config', (req, res) =>
+  res.json({ firstUser: q.userCount.get().c === 0, signupEnabled: config.openSignup }));
+
 app.post('/api/signup', slowDown, (req, res) => {
-  const { email, password, name } = req.body || {};
+  const { email, password, name, setupToken } = req.body || {};
   const first = q.userCount.get().c === 0;
-  if (!config.openSignup && !first) return res.status(403).json({ error: 'Signups are closed' });
+  if (first) {
+    if (config.bootstrapAdminToken.length < 24 ||
+        !constantTimeMatch(setupToken || '', config.bootstrapAdminToken)) {
+      return res.status(403).json({ error: 'First admin requires BOOTSTRAP_ADMIN_TOKEN (24+ characters) configured on the server.' });
+    }
+  } else if (!config.openSignup) {
+    return res.status(403).json({ error: 'Signups are closed' });
+  }
   if (!email || !/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'Valid email required' });
   if (!password || password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
   if (q.userByEmail.get(email.toLowerCase())) return res.status(409).json({ error: 'Email already registered' });
@@ -62,7 +80,7 @@ app.post('/api/login', slowDown, (req, res) => {
 });
 
 app.post('/api/logout', (req, res) => {
-  if (req.cookies.token) q.deleteToken.run(req.cookies.token);
+  if (req.cookies.token) q.deleteToken.run(tokenHash(req.cookies.token));
   res.clearCookie('token');
   res.json({ ok: true });
 });
@@ -91,19 +109,36 @@ app.post('/api/wa/connect', auth, async (req, res) => {
 app.get('/api/wa/status', auth, (req, res) => res.json(sessionFor(req).info()));
 app.post('/api/wa/logout', auth, async (req, res) => { const s = sessionFor(req); await s.logout(); res.json(s.info()); });
 
+// Emergency switch: revoke every locally stored linked-device session.
+// For sessions offline during revocation, also remove them in WhatsApp Linked Devices.
+app.post('/api/admin/disconnect-all', auth, admin, async (req, res) => {
+  try {
+    const result = await wa.logoutAll();
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(500).json({ error: 'Not all sessions could be disconnected; check server logs.' });
+  }
+});
+
 // ---------- settings ----------
 app.get('/api/settings', auth, (req, res) => res.json(getSettings(sessionFor(req).id)));
 app.post('/api/settings', auth, (req, res) => {
   const id = sessionFor(req).id;
   const b = req.body || {};
   const current = getSettings(id);
+  const options = { ...current.options, ...cleanOptions(b.options) };
+  const autoReply = (b.auto_reply ?? current.auto_reply) ? 1 : 0;
+  const replyGroups = (b.reply_groups ?? current.reply_groups) ? 1 : 0;
+  if (id !== 'house' && (autoReply || replyGroups) && !hasApprovedNumbers(options.allow_list)) {
+    return res.status(400).json({ error: 'Personal WhatsApp incoming replies require an approved international phone number.' });
+  }
   q.upsertSettings.run({
     session_id: id,
     persona: String(b.persona ?? current.persona ?? '').slice(0, 2000),
-    auto_reply: (b.auto_reply ?? current.auto_reply) ? 1 : 0,
-    reply_groups: (b.reply_groups ?? current.reply_groups) ? 1 : 0,
+    auto_reply: autoReply,
+    reply_groups: replyGroups,
     enabled: b.enabled === false ? 0 : 1,
-    options: JSON.stringify({ ...current.options, ...cleanOptions(b.options) }),
+    options: JSON.stringify(options),
   });
   res.json(getSettings(id));
 });
@@ -137,6 +172,8 @@ async function snapshot() {
   };
 }
 app.get('/api/admin/stats', auth, admin, async (req, res) => res.json({ ...(await snapshot()), userList: q.listUsers.all() }));
+app.get('/api/admin/reply-audit', auth, admin, (req, res) =>
+  res.json({ events: q.listReplyAudits.all(100) }));
 
 // Public health endpoint for uptime monitors (Uptime Kuma etc.)
 app.get('/health', async (req, res) => {
@@ -147,7 +184,7 @@ app.get('/health', async (req, res) => {
 });
 
 // Prometheus-style metrics
-app.get('/metrics', async (req, res) => {
+app.get('/metrics', auth, admin, async (req, res) => {
   const s = await snapshot();
   res.type('text/plain').send([
     `wa_agent_uptime_seconds ${s.uptimeSec}`,
@@ -165,7 +202,10 @@ app.get('/{*splat}', (req, res) => res.sendFile(path.join(__dirname, '..', 'publ
 
 // ---------- housekeeping ----------
 if (config.retentionDays > 0) {
-  setInterval(() => q.prune.run(config.retentionDays * 86400), 6 * 3600_000).unref();
+  setInterval(() => {
+    q.prune.run(config.retentionDays * 86400);
+    q.pruneReplyAudits.run(config.retentionDays * 86400);
+  }, 6 * 3600_000).unref();
 }
 
 app.listen(config.port, '0.0.0.0', () => {
