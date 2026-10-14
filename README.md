@@ -37,7 +37,7 @@ git clone https://github.com/Srulyg101/air-whatsapp-agent.git air-agent && cd ai
 sudo bash install.sh
 ```
 
-The installer frees disk space, installs Docker, adds swap on small servers, chooses a model that fits your RAM, and starts everything. Then open `http://YOUR_SERVER_IP`.
+The installer frees disk space, installs Docker, adds swap on small servers, chooses a model that fits your RAM, and starts everything. Then open `http://YOUR_SERVER_IP:8080`.
 
 ## Day-to-day
 
@@ -55,11 +55,11 @@ Point an A record at the server, then put Caddy in front for free HTTPS:
 
 ```bash
 apt install -y caddy
-echo 'agent.yourdomain.com { reverse_proxy localhost:80 }' > /etc/caddy/Caddyfile
+echo 'agent.yourdomain.com { reverse_proxy localhost:8080 }' > /etc/caddy/Caddyfile
 systemctl reload caddy
 ```
 
-Set `PUBLIC_PORT=8080` in `.env` (so Caddy can own 80/443), use `reverse_proxy localhost:8080`, set `COOKIE_SECURE=true`, and run `docker compose up -d`.
+Set `COOKIE_SECURE=true`, and run `docker compose up -d`.
 
 ## Important
 

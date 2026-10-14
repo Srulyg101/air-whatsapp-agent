@@ -46,7 +46,7 @@ fi
 
 
 if command -v ufw >/dev/null && ufw status | grep -q active; then
-  ufw allow 80/tcp >/dev/null; ufw allow 3001/tcp >/dev/null
+  ufw allow 8080/tcp >/dev/null; ufw allow 3001/tcp >/dev/null
 fi
 
 say "Building and starting (first run downloads the AI model — a few minutes)"
@@ -54,8 +54,8 @@ docker compose up -d
 
 IP=$(curl -fsS -4 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 say "Done!"
-echo "  Dashboard:        http://${IP}"
-echo "  Uptime monitor:   http://${IP}:3001  (add an HTTP monitor for http://${IP}/health)"
+echo "  Dashboard:        http://${IP}:8080"
+echo "  Uptime monitor:   http://${IP}:3001  (add an HTTP monitor for http://${IP}:8080/health)"
 echo "  Model download:   docker compose logs -f ollama-pull"
 echo "  App logs:         docker compose logs -f app"
 echo
