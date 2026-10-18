@@ -264,3 +264,134 @@ details[open] summary { margin-bottom: 10px; }
   .mainwrap { background: linear-gradient(var(--band) 0 120px, transparent 120px); }
   .mobilebar { background: var(--band); color: var(--bandText); border-bottom: 0; }
 }
+
+
+/* Air Agent 2.3: welcoming design for nontechnical WhatsApp users */
+:root {
+  --brand:#078b72; --brandDark:#056a59; --brandSoft:rgba(7,139,114,.10);
+  --band:#13353b; --bandText:#fff; --radius:18px;
+  --bg:#f4f7f6; --card2:#f7f9f8;
+  --shadow:0 12px 32px rgba(12,38,43,.045),0 2px 7px rgba(12,38,43,.035);
+}
+:root[data-theme="dark"] { --bg:#0b171a; --card2:#203237; --brand:#24c69d; --brandSoft:rgba(36,198,157,.13); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg:#0b171a; --card2:#203237; --brand:#24c69d; --brandSoft:rgba(36,198,157,.13); }
+}
+body { letter-spacing:-.005em; }
+button, a, summary { -webkit-tap-highlight-color:transparent; }
+.btn { min-height:40px; border-radius:11px; justify-content:center; }
+.btn.lg { border-radius:13px; padding:13px 21px; font-size:15px; }
+.btn:focus-visible,a:focus-visible,summary:focus-visible { outline:3px solid var(--brand); outline-offset:3px; }
+.card { border-radius:18px; padding:23px; }
+.side { padding:23px 15px 18px; gap:23px; }
+.side .brand { font-size:20px; letter-spacing:-.035em; }
+.logo { border-radius:12px; background:var(--brand); width:37px; height:37px; }
+.side .logo svg { width:22px; height:22px; }
+.nav { gap:3px; }
+.navCaption { color:var(--faint); font-size:10px; font-weight:800; letter-spacing:.13em; padding:7px 13px; }
+.nav a { min-height:43px; font-size:14px; border-radius:12px; padding:11px 13px; }
+.nav a.active { font-weight:700; }
+.navMore { border-top:1px solid var(--line); margin-top:12px; padding-top:9px; }
+.navMore summary { cursor:pointer; color:var(--muted); font-size:13px; padding:12px; border-radius:11px; font-weight:700; list-style:none; display:flex; justify-content:space-between; }
+.navMore summary::-webkit-details-marker { display:none; }
+.navMore summary:hover { background:var(--card2); }
+.navMore[open] summary span { transform:rotate(180deg); }
+.navMoreItems { padding-left:5px; }
+.main { max-width:1160px; padding:34px 40px 120px; }
+.pagehead h1 { font-size:29px; letter-spacing:-.045em; font-weight:760; }
+.pagehead p { font-size:15px; }
+.eyebrow { font-size:11px; font-weight:800; letter-spacing:.125em; text-transform:uppercase; }
+.homeHead { align-items:center; margin-bottom:25px; }
+.homeHead .eyebrow { color:#b1e2d1; display:block; margin-bottom:4px; }
+.homeIntro { background:linear-gradient(112deg,#0c4344,#112e39 68%,#173941); border:1px solid rgba(255,255,255,.1); color:white; border-radius:22px; margin-bottom:23px; padding:32px 36px; display:flex; align-items:center; justify-content:space-between; gap:20px; box-shadow:0 16px 30px rgba(5,32,36,.14); overflow:hidden; }
+.homeIntro .eyebrow { color:#78dec0; display:block; margin-bottom:10px; }
+.homeIntro h2 { font-size:27px; letter-spacing:-.04em; line-height:1.18; max-width:650px; margin-bottom:10px; }
+.homeIntro p { color:#dbefea; font-size:15px; max-width:650px; margin-bottom:19px; }
+.homeIntroMark { display:grid; place-items:center; font-size:63px; min-width:115px; min-height:115px; border-radius:32px; background:rgba(255,255,255,.08); transform:rotate(-8deg); }
+.homeIntro .btn.ghost { color:white; border-color:rgba(255,255,255,.42); }
+.homeIntro .btn.ghost:hover { background:rgba(255,255,255,.11); }
+.setupHead { display:flex; justify-content:space-between; align-items:center; gap:16px; margin:12px 0 12px; }
+.setupHead h2 { font-size:18px; letter-spacing:-.035em; }
+.setupHead span, .setupHead a { color:var(--muted); font-size:13px; }
+.setupGrid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:15px; margin-bottom:19px; }
+.setupCard { background:var(--panel); border:1px solid var(--line); box-shadow:var(--shadow); border-radius:18px; display:flex; gap:13px; align-items:start; padding:20px 17px; color:var(--text); min-width:0; transition:transform .16s,border-color .16s; }
+.setupCard:hover { text-decoration:none; transform:translateY(-2px); border-color:var(--brand); }
+.setupIcon { display:grid; place-items:center; flex:none; width:34px; height:34px; border-radius:11px; background:var(--brandSoft); color:var(--brand); font-size:16px; font-weight:800; }
+.setupBody b { font-size:15px; line-height:1.25; display:block; }
+.setupBody p { color:var(--muted); font-size:13px; margin:6px 0; }
+.setupLink { color:var(--brand); font-size:13px; font-weight:750; }
+.simpleControls .sw { align-items:center; }
+.helpStrip { background:var(--card2); border:1px solid var(--line); border-radius:18px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:18px 23px; }
+.helpStrip b { font-size:15px; }
+.helpStrip p { color:var(--muted); font-size:13px; margin:4px 0 0; }
+.stats .stat { border-radius:16px; }
+
+/* Sign in, sign up, reset password: simple, readable, keyboard accessible */
+.landing { background:linear-gradient(180deg,#103b3e 0 248px,#f4f7f6 248px); padding:0 20px 45px; }
+.landing .top { max-width:1130px; padding:23px 0 27px; font-size:19px; text-transform:none; letter-spacing:-.025em; font-weight:800; }
+.landing .top .logo { background:white; color:#087e6b; }
+.topHint { margin-left:auto; font-size:13px; opacity:.8; font-weight:500; letter-spacing:0; }
+.landing .hero { max-width:1130px; grid-template-columns:1.06fr .94fr; box-shadow:0 22px 55px rgba(8,34,35,.14); border-radius:23px; overflow:hidden; }
+.landing .hero .l { padding:47px 45px; background:linear-gradient(148deg,#113e41,#103139 70%); color:#fff; }
+.landing .hero .l .eyebrow { color:#80e5cc; display:block; margin-bottom:16px; }
+.landing .hero .l h1 { font-size:clamp(32px,3.4vw,44px); line-height:1.13; color:#fff; font-weight:520; letter-spacing:-.05em; margin:0 0 18px; }
+.landing .hero .l h1 b { font-weight:800; }
+.landingLead { font-size:16px; color:#d9efeb; max-width:440px; line-height:1.65; }
+.landingSteps { display:grid; gap:12px; margin-top:29px; }
+.landingSteps > div { display:flex; align-items:center; gap:14px; }
+.landingSteps b { display:block; font-weight:700; }
+.landingSteps small { display:block; font-size:13px; color:#c5e0dc; }
+.stepNum { display:grid; place-items:center; width:34px; height:34px; flex:none; border-radius:50%; background:#e0fff2; color:#0a614f; font-weight:850; }
+.trustLine { color:#b4e2d6; font-size:12px; margin-top:35px; }
+.landing .hero .r { padding:48px 46px; border:0; display:flex; flex-direction:column; justify-content:center; }
+.authHeader { margin-bottom:24px; }
+.authGlyph { display:grid; place-items:center; width:48px; height:48px; border-radius:15px; background:var(--brandSoft); color:var(--brand); font-size:28px; margin-bottom:19px; }
+.authHeader h2 { font-size:26px; font-weight:800; letter-spacing:-.04em; }
+.authHeader p { color:var(--muted); font-size:14px; margin:6px 0 0; }
+.authLabel { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+.authLabel a { font-size:13px; font-weight:700; }
+.landing input, .recoveryPanel input { min-height:48px; background:var(--panel); border-radius:12px; font-size:15px; }
+.passwordInput { position:relative; }
+.passwordInput input { padding-right:74px; }
+.passwordInput button { position:absolute; right:9px; top:7px; border:0; background:var(--card2); border-radius:8px; padding:7px 12px; color:var(--muted); cursor:pointer; }
+.authSubmit { width:100%; display:flex; justify-content:space-between; min-height:49px; font-weight:800; border-radius:12px !important; }
+.authSubmit span { font-size:18px; }
+.authBottom { text-align:center; font-size:13px; margin:19px 0; }
+.authBottom a { font-weight:800; }
+.authPrivacy { border-top:1px solid var(--line); padding-top:15px; color:var(--muted); font-size:12px; margin-top:22px; }
+.landing .feats { max-width:1130px; grid-template-columns:repeat(4,1fr); gap:14px; margin-top:18px; }
+.landing .feat { border-radius:16px; border:1px solid #e4eae8; box-shadow:0 5px 16px rgba(12,38,43,.045); padding:20px; }
+.landing .feat .fi { border-radius:12px; }
+.landing .legal { max-width:1130px; color:#6a7c80; }
+.recoveryLanding .top { max-width:520px; }
+.recoveryPanel { margin:15px auto 30px; max-width:490px; padding:34px; background:var(--panel); border-radius:22px; box-shadow:0 24px 60px rgba(8,34,35,.16); }
+.recoveryPanel h1 { font-size:29px; letter-spacing:-.04em; margin-bottom:8px; }
+.recoveryPanel p { font-size:14px; line-height:1.55; }
+.recoveryIcon { display:grid; place-items:center; width:52px; height:52px; border-radius:15px; background:var(--brandSoft); font-size:25px; margin-bottom:20px; }
+.recoveryInfo { background:var(--warnSoft); border:1px solid var(--warn); border-radius:12px; padding:11px 13px; margin:15px 0; font-size:13px; }
+.recoverySuccess { color:var(--brand); font-size:14px; line-height:1.5; font-weight:600; padding:9px 0; }
+.recoveryError { color:var(--danger); font-size:14px; padding:7px 0; }
+.authBack { display:inline-block; margin-top:18px; font-weight:700; font-size:14px; }
+#aErr:not(:empty) { color:var(--danger); font-size:13px; }
+@media(max-width:1000px) {
+  .main { padding:22px 23px 120px; }
+  .landing .hero { grid-template-columns:1fr 1fr; }
+  .landing .hero .l,.landing .hero .r { padding:30px; }
+  .setupGrid { grid-template-columns:1fr; }
+}
+@media(max-width:700px) {
+  .landing .hero { grid-template-columns:1fr; }
+  .landing .hero .l { padding:30px 25px; }
+  .landing .hero .r { padding:30px 25px; }
+  .landing .topHint { display:none; }
+  .landing .feats { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .homeIntro { padding:24px; }
+  .homeIntroMark { display:none; }
+  .homeIntro h2 { font-size:23px; }
+  .setupHead { align-items:start; flex-direction:column; gap:2px; }
+  .helpStrip { align-items:stretch; flex-direction:column; }
+  .main { padding:20px 15px 120px; }
+  .recoveryPanel { padding:26px 21px; }
+}
+@media(max-width:440px) { .landing .feats { grid-template-columns:1fr; } .landing { padding-left:12px; padding-right:12px; } }
+@media(prefers-reduced-motion:reduce) { .setupCard { transition:none; } html:focus-within { scroll-behavior:auto; } }
