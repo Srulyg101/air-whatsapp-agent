@@ -79,6 +79,8 @@ const empty = (ico, text) => `<div class="empty"><div class="ei">${ico}</div>${t
 // ---------- boot ----------
 async function boot() {
   try { S.pub = await api('/api/public'); } catch (_) { S.pub = { botName: 'Air Agent', signupOpen: false }; }
+  // Reset links work even if this browser is already logged in to another account.
+  if (/^#\/reset(?:\?|$)/.test(location.hash)) return renderAuth('reset');
   try { S.me = await api('/api/me'); } catch (_) { const mode = (location.hash.match(/^#\/(reset|forgot|signup|login)(?:\?|$)/) || [])[1]; return renderAuth(mode || (S.pub.firstUser ? 'signup' : 'login')); }
   try { const t = sessionStorage.getItem('target'); if (t === 'house' && S.me.user.is_admin) S.target = 'house'; } catch (_) {}
   await loadSettings();
