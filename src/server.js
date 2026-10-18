@@ -16,6 +16,7 @@ const { think } = require('./agent');
 const wa = require('./wa');
 const { mask } = require('./secrets');
 const email = require('./email');
+const recovery = require('./password-recovery');
 
 const app = express();
 app.disable('x-powered-by');
@@ -77,7 +78,7 @@ app.use('/api', (req, res, next) => {
 
 const signupOpen = () => config.forceOpenSignup || getApp('signup_open') === '1';
 
-app.get('/api/public', (req, res) => res.json({ botName: config.botName, signupOpen: signupOpen() || q.userCount.get().c === 0, firstUser: q.userCount.get().c === 0 }));
+app.get('/api/public', (req, res) => res.json({ botName: config.botName, signupOpen: signupOpen() || q.userCount.get().c === 0, firstUser: q.userCount.get().c === 0, passwordRecoveryReady: recovery.isConfigured() }));
 
 app.post('/api/signup', slowDown, wrap((req, res) => {
   const { email, password, name } = req.body || {};
@@ -121,6 +122,7 @@ app.post('/api/account/password', auth, slowDown, wrap((req, res) => {
   if (!nw || String(nw).length < 8) throw bad('New password must be at least 8 characters');
   q.setPassword.run(bcrypt.hashSync(String(nw), 10), u.id);
   q.deleteUserTokens.run(u.id);
+  q.deletePasswordResets.run(u.id);
   login(req, res, u.id);
   res.json({ ok: true });
 }));
@@ -132,6 +134,50 @@ app.post('/api/account/delete-data', auth, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ---------- self-service password recovery ----------
+// Always return the same message: callers must not learn whether an email has an account.
+const resetSentMessage = 'If an account exists for that email and recovery email is set up, a reset link will arrive shortly. Please check spam too.';
+app.post('/api/password/forgot', slowDown, wrap(async (req, res) => {
+  const address = String(req.body?.email || '').trim().toLowerCase();
+  if (address.length > 254 || !/^\S+@\S+\.\S+$/.test(address)) return res.status(400).json({ error: 'Enter a valid email address' });
+  const user = q.userByEmail.get(address);
+  if (!user || !recovery.isConfigured()) return res.json({ message: resetSentMessage });
+  const now = Math.floor(Date.now() / 1000);
+  q.prunePasswordResets.run(now);
+  if (q.recentPasswordReset.get(user.id, now - recovery.RESET_COOLDOWN_SECONDS))
+    return res.json({ message: resetSentMessage });
+  const token = recovery.newToken();
+  const hash = recovery.hashToken(token);
+  // Only a SHA-256 digest is persisted. The raw token appears solely in the email URL.
+  q.deletePasswordResets.run(user.id);
+  q.issuePasswordReset.run(hash, user.id, now, now + recovery.RESET_TTL_SECONDS);
+  try { await recovery.sendRecoveryEmail({ to: user.email, token }); }
+  catch (err) {
+    q.revokePasswordReset.run(hash);
+    console.error('[password-recovery] Email delivery failed:', err.message);
+  }
+  res.json({ message: resetSentMessage });
+}));
+
+app.post('/api/password/reset', slowDown, wrap((req, res) => {
+  const token = String(req.body?.token || '');
+  const password = String(req.body?.password || '');
+  if (!/^[a-f0-9]{64}$/i.test(token)) throw bad('This reset link is invalid or expired. Request a new one.', 400);
+  if (password.length < 10 || password.length > 72) throw bad('Choose a password between 10 and 72 characters.', 400);
+  const hash = recovery.hashToken(token.toLowerCase());
+  const newHash = bcrypt.hashSync(password, 10);
+  const updated = db.db.transaction(() => {
+    const claimed = q.consumePasswordReset.get(hash, Math.floor(Date.now() / 1000));
+    if (!claimed) return false;
+    q.setPassword.run(newHash, claimed.user_id);
+    q.deleteUserTokens.run(claimed.user_id);
+    q.deletePasswordResets.run(claimed.user_id);
+    return true;
+  })();
+  if (!updated) throw bad('This reset link is invalid or expired. Request a new one.', 400);
+  res.clearCookie('token', { path: '/' });
+  res.json({ ok: true, message: 'Password updated. Sign in with your new password.' });
+}));
 // ---------- which number are we editing ----------
 function sessionFor(req) {
   const id = req.query.target === 'house' && req.user.is_admin ? 'house' : sessionIdFor(req.user);
@@ -516,7 +562,7 @@ app.get('/api/admin/settings', auth, admin, (req, res) => res.json({
   groqConfigured: !!(process.env.GROQ_API_KEY || (getApp('ai_base_url') === 'https://api.groq.com/openai/v1' && getAppSecret('ai_key'))),
   local_default_model: config.model, ollama_url: config.ollamaUrl, pulls: ai.pulls,
   mail_domain: getApp('mail_domain'), bot_smtp_host: getApp('bot_smtp_host'), bot_smtp_port: getApp('bot_smtp_port'), bot_smtp_user: getApp('bot_smtp_user'),
-  bot_smtp_pass: mask(getAppSecret('bot_smtp_pass')), inbound_secret: email.inboundSecret(),
+  bot_smtp_pass: mask(getAppSecret('bot_smtp_pass')), reset_email_from: getApp('reset_email_from'), passwordRecoveryReady: recovery.isConfigured(), inbound_secret: email.inboundSecret(),
   inbound_url: `${req.protocol}://${req.get('host')}/api/inbound/email`,
 }));
 app.post('/api/admin/settings', auth, admin, wrap((req, res) => {
@@ -527,6 +573,11 @@ app.post('/api/admin/settings', auth, admin, wrap((req, res) => {
     const v = String(b[k] || '').trim();
     if (v && !/^https?:\/\//.test(v)) throw bad(`${k} must start with http(s)://`);
     setApp(k, v.replace(/\/$/, ''));
+  }
+  if ('reset_email_from' in b) {
+    const addr = String(b.reset_email_from || '').trim();
+    if (addr && !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(addr)) throw bad('Enter a valid password reset sender email');
+    setApp('reset_email_from', addr);
   }
   for (const k of ['ai_daily_limit', 'voice_daily_seconds']) if (k in b) {
     const n = Number(b[k]);
@@ -562,6 +613,8 @@ app.post('/api/admin/users/:id', auth, admin, wrap(async (req, res) => {
   if (b.password) {
     if (String(b.password).length < 8) throw bad('Password must be at least 8 characters');
     q.setPassword.run(bcrypt.hashSync(String(b.password), 10), id);
+    q.deleteUserTokens.run(id);
+    q.deletePasswordResets.run(id);
     q.deleteUserTokens.run(id);
   }
   if (b.disconnect) await wa.get(`u${id}`).logout();
@@ -611,7 +664,7 @@ app.get('/{*splat}', (req, res) => res.sendFile(path.join(__dirname, '..', 'publ
 
 // ---------- housekeeping ----------
 if (config.retentionDays > 0) {
-  const prune = () => { q.prune.run(config.retentionDays * 86400); q.pruneEvents.run(Math.max(30, config.retentionDays) * 86400); q.pruneDaily.run(); };
+  const prune = () => { q.prune.run(config.retentionDays * 86400); q.pruneEvents.run(Math.max(30, config.retentionDays) * 86400); q.pruneDaily.run(); q.prunePasswordResets.run(Math.floor(Date.now() / 1000)); };
   prune();
   setInterval(prune, 6 * 3600_000).unref();
 }
