@@ -129,3 +129,24 @@ Air Agent's homepage guides nontechnical owners through 1) scanning WhatsApp, 2)
 
 ### Production safety
 - GitHub checks JavaScript parsing plus unit and HTTP/SQLite integration tests before deployment. Do not advertise production readiness until visiting `/health`, testing WhatsApp QR linking, confirming email delivery, and successfully resetting a real account password.
+
+
+## Fully open-source SMTP for password reset
+
+Air Agent supports an optional, separate [Stalwart self-hosted mail server](deploy/mail/README.md)
+using a pinned Stalwart Community Docker image. This avoids per-email vendor
+API costs; it does **not** bypass domain registration, DNS configuration, VPS
+mail ports, anti-abuse and IP reputation requirements.
+
+- The companion stack is at `deploy/mail/docker-compose.yml`; it is not
+  launched by the app's normal auto-updater, so it cannot disrupt Caddy/WhatsApp.
+- After provisioning Stalwart and DNS, open **Admin → Password recovery →
+  Use open-source Stalwart**. This sets `mail.notify.llama2.com`, port 587
+  and `no-reply@notify.llama2.com` as *example* SMTP identity. Adjust if the
+  domain is different; set a unique SMTP application password, then **Save**.
+- Click **Send test email to me** in Admin. The endpoint sends only to the
+  authenticated admin's account email and never exposes SMTP credentials.
+  Sending requires STARTTLS (587) or implicit TLS (465), with TLS 1.2+.
+  SMTP acceptance is **not** guaranteed inbox delivery; check the destination.
+- Forgot-password links still last 20 minutes, are single-use, and are
+  cryptographically hashed in the database. The SMTP test sends no reset token.
