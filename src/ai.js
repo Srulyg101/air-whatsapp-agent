@@ -3,6 +3,8 @@
 const config = require('./config');
 const { getApp, getAppSecret, getSecret } = require('./db');
 const { assertPublicUrl } = require('./netguard');
+const GROQ_BASE = 'https://api.groq.com/openai/v1';
+const { boundedText } = require('./token-budget');
 
 let stats = { requests: 0, errors: 0, totalMs: 0, lastError: null };
 
@@ -15,16 +17,28 @@ function resolveProvider(settings) {
   if (settings && o.ai_mode === 'custom' && getApp('allow_custom_ai') === '1' && o.ai_base_url && o.ai_model) {
     return { base: o.ai_base_url.replace(/\/$/, ''), model: o.ai_model, key: getSecret(settings.session_id, 'ai_key'), label: 'custom' };
   }
-  const base = (getApp('ai_base_url') || '').replace(/\/$/, '');
-  return { base: base || LOCAL(), model: getApp('ai_model') || config.model, key: getAppSecret('ai_key'), label: base ? 'server-api' : 'local' };
+  const configured = (getApp('ai_base_url') || '').replace(/\/$/, '');
+  const groqKey = process.env.GROQ_API_KEY || '';
+  const managed = !configured && !!groqKey;
+  const base = configured || (managed ? GROQ_BASE : LOCAL());
+  return {
+    base, model: getApp('ai_model') || (managed ? 'openai/gpt-oss-20b' : config.model),
+    key: getAppSecret('ai_key') || (base === GROQ_BASE ? groqKey : ''),
+    label: base === LOCAL() ? 'local' : (managed ? 'managed-groq' : 'server-api'),
+  };
 }
 
 /**
  * chat(messages, { provider, tools }) -> { content, toolCalls: [{id, name, args}] }
  * messages use the OpenAI format (role/content, assistant.tool_calls, role:'tool').
  */
-async function chat(messages, { provider, tools, temperature = 0.6, timeoutMs = 180_000 } = {}) {
+async function chat(messages, { provider, tools, temperature = 0.6, timeoutMs = 65_000, budgetSessionId } = {}) {
   const p = provider || resolveProvider(null);
+  if (budgetSessionId) {
+    const { q } = require('./db');
+    const max = Math.max(0, Number(getApp('ai_daily_limit') || 0));
+    if (max && !q.claimAi.run(budgetSessionId, max).changes) throw new Error('Daily AI request allowance reached');
+  }
   const started = Date.now();
   stats.requests++;
   try {
@@ -132,7 +146,16 @@ async function anthropicChat(p, messages, tools, temperature, timeoutMs) {
 }
 
 async function openaiChat(p, messages, tools, temperature, timeoutMs) {
-  const body = { model: p.model, messages, temperature };
+  const groq = p.base.replace(/\/$/, '') === GROQ_BASE;
+  const compact = messages.map(m => m.role === 'system' ? { ...m, content: boundedText(m.content, 9500) } :
+    m.role === 'tool' ? { ...m, content: boundedText(m.content, 1800) } :
+    m.role === 'assistant' && m.tool_calls ? m : { ...m, content: boundedText(m.content, 2200) });
+  const body = { model: p.model, messages: compact, temperature };
+  if (groq) {
+    body.max_completion_tokens = tools?.length ? 1100 : 650;
+    if (/^openai\/gpt-oss-(20b|120b)$/.test(p.model)) body.reasoning_effort = 'low';
+    if (/^openai\/gpt-oss-(20b|120b)$/.test(p.model)) body.parallel_tool_calls = false;
+  } else body.max_tokens = tools?.length ? 1100 : 650;
   if (tools?.length) { body.tools = tools; body.tool_choice = 'auto'; }
   const res = await fetch(`${p.base}/chat/completions`, {
     method: 'POST',
