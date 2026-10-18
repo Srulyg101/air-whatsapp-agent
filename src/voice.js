@@ -5,6 +5,7 @@ const { spawn } = require('child_process');
 const config = require('./config');
 const { getApp, getAppSecret, getSecret } = require('./db');
 const { assertPublicUrl } = require('./netguard');
+const GROQ_BASE = 'https://api.groq.com/openai/v1';
 
 let ffmpegPath = null;
 try { ffmpegPath = require('ffmpeg-static'); } catch (_) { ffmpegPath = 'ffmpeg'; }
@@ -66,14 +67,18 @@ async function audioProvider(settings) {
     await assertPublicUrl(o.ai_base_url);
     return { base: o.ai_base_url.replace(/\/$/, ''), key: getSecret(settings.session_id, 'voice_api_key') || getSecret(settings.session_id, 'ai_key') };
   }
-  const base = (getApp('voice_api_base') || '').replace(/\/$/, '');
-  if (!base) throw new Error('No speech API configured. Ask the admin to set one, or use your own AI provider.');
-  return { base, key: getAppSecret('voice_api_key') };
+  const configured = (getApp('voice_api_base') || '').replace(/\/$/, '');
+  const groqFromAi = (getApp('ai_base_url') || '').replace(/\/$/, '') === GROQ_BASE && !!getAppSecret('ai_key');
+  const base = configured || (groqFromAi || process.env.GROQ_API_KEY ? GROQ_BASE : '');
+  if (!base) throw new Error('No speech API configured. Set up Groq in Admin or use local Whisper.');
+  const key = getAppSecret('voice_api_key') || (base === GROQ_BASE ? getAppSecret('ai_key') || process.env.GROQ_API_KEY || '' : '');
+  if (!key && base === GROQ_BASE) throw new Error('Groq speech API key is missing');
+  return { base, key };
 }
 
 async function transcribeApi(buffer, mimetype, settings) {
   const p = await audioProvider(settings);
-  const model = settings.options.voice_api_model || (/groq\.com/.test(p.base) ? 'whisper-large-v3-turbo' : getApp('voice_api_model') || 'whisper-1');
+  const model = settings.options.voice_api_model || (p.base === GROQ_BASE ? 'whisper-large-v3-turbo' : getApp('voice_api_model') || 'whisper-1');
   const form = new FormData();
   form.append('file', new Blob([buffer], { type: mimetype || 'audio/ogg' }), 'voice.ogg');
   form.append('model', model);
@@ -83,8 +88,16 @@ async function transcribeApi(buffer, mimetype, settings) {
   return String(data.text || '').trim();
 }
 
+function managedSpeechReady() {
+  return !!(getApp('voice_api_base') || process.env.GROQ_API_KEY ||
+    ((getApp('ai_base_url') || '').replace(/\/$/, '') === GROQ_BASE && getAppSecret('ai_key')));
+}
 async function transcribe(buffer, mimetype, settings) {
-  return settings.options.voice_engine === 'api' ? transcribeApi(buffer, mimetype, settings) : transcribeLocal(buffer);
+  if (!Buffer.isBuffer(buffer) || buffer.length < 100 || buffer.length > 15 * 1024 * 1024)
+    throw new Error('Voice note must be between 100 bytes and 15 MB');
+  const engine = settings.options.voice_engine;
+  if (engine === 'api' || (engine === 'smart' && managedSpeechReady())) return transcribeApi(buffer, mimetype, settings);
+  return transcribeLocal(buffer);
 }
 
 /** Text -> WhatsApp voice note (needs an OpenAI-compatible /audio/speech API). */
@@ -100,4 +113,4 @@ async function speak(text, settings) {
   return toVoiceNote(Buffer.from(await res.arrayBuffer()));
 }
 
-module.exports = { transcribe, speak, decodeTo16k, toVoiceNote, whisperStatus: () => whisperState, warmup: () => getWhisper().catch(() => {}) };
+module.exports = { transcribe, speak, managedSpeechReady, decodeTo16k, toVoiceNote, whisperStatus: () => whisperState, warmup: () => getWhisper().catch(() => {}) };
