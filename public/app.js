@@ -1118,6 +1118,28 @@ PAGES.admin = {
   },
   async after() { await loadAdmin(); },
   acts: {
+    stalwartPreset: () => {
+      const host = $('[data-admin="bot_smtp_host"]');
+      const username = $('[data-admin="bot_smtp_user"]');
+      const password = $('[data-admin="bot_smtp_pass"]');
+      const existing = host?.value?.trim() || username?.value?.trim();
+      if (existing && (host.value !== 'mail.notify.llama2.com' || username.value !== 'no-reply@notify.llama2.com') &&
+          !confirm('This changes the existing mail server settings. Continue?')) return;
+      host.value = 'mail.notify.llama2.com';
+      $('[data-admin="bot_smtp_port"]').value = '587';
+      username.value = 'no-reply@notify.llama2.com';
+      $('[data-admin="reset_email_from"]').value = 'no-reply@notify.llama2.com';
+      // Never carry a password over from a different mail provider.
+      if (existing && password) password.value = '';
+      toast('Stalwart details filled in. Start your Stalwart mail server, create this mailbox and app password, then paste that password and save.');
+      $('#aRecovery')?.scrollIntoView({ behavior:'smooth', block:'center' });
+    },
+    smtpTest: b => busy(b, async () => {
+      const result = await api('/api/admin/password-recovery/test', { body:{} });
+      const box = $('#smtpTestResult');
+      if (box) box.textContent = result.message + ' Sent to ' + result.recipient;
+      toast('SMTP accepted your test. Now verify it reached your inbox.');
+    }),
     groqPreset: () => {
       $('[data-admin="ai_base_url"]').value = 'https://api.groq.com/openai/v1';
       $('[data-admin="ai_model"]').value = 'openai/gpt-oss-20b';
@@ -1182,8 +1204,17 @@ async function loadAdmin() {
     <div class="field"><label class="lbl">Password-reset sender email (optional)</label>
       <input type="email" data-admin="reset_email_from" placeholder="support@yourdomain.com" value="${esc(a.reset_email_from || '')}">
       <div class="hint">Leave blank to use the SMTP username. This email should be authorized to send through your SMTP provider.</div></div>
-    <button class="btn sm" data-act="saveAdmin" data-busy="Saving…">Save recovery settings</button>
-    <p class="small muted" style="margin-top:10px">Recovery links use the HTTPS address agent.llama2.com by default. Set PUBLIC_URL to your verified HTTPS origin if you move domains. Never set it from a request Host header.</p>
+    <div class="field" style="margin-top:16px">
+      <div style="font-weight:700;margin-bottom:5px">Free open-source option: Stalwart</div>
+      <p class="small muted">Host your own mail server on your VPS. No per-message vendor bill. Requires one-time domain DNS, a secure mail server and an SMTP app password.</p>
+      <div class="row"><button class="btn ghost sm" data-act="stalwartPreset">Use open-source Stalwart</button>
+      <a class="btn ghost sm" href="https://github.com/Srulyg101/air-whatsapp-agent/blob/main/deploy/mail/README.md" target="_blank" rel="noopener noreferrer">Setup instructions ↗</a></div>
+    </div>
+    <div class="divider"></div>
+    <div class="row"><button class="btn sm" data-act="saveAdmin" data-busy="Saving…">Save recovery settings</button>
+      <button class="btn ghost sm" data-act="smtpTest" data-busy="Sending test…">Send test email to me</button></div>
+    <p id="smtpTestResult" class="small muted" role="status" style="margin-top:10px"></p>
+    <p class="small muted">The SMTP test checks login/TLS and mail submission. You must check your inbox (and spam) before relying on password resets. Recovery links use agent.llama2.com by default, or the trusted PUBLIC_URL.</p>
   `;
   $('#aMail').innerHTML = `
     <div class="grid2"><div class="field"><label class="lbl">Mail domain</label><input data-admin="mail_domain" value="${esc(a.mail_domain)}" placeholder="bots.airbiz.ai"><div class="hint">A domain or subdomain you control, used only for bot addresses.</div></div>
@@ -1195,7 +1226,8 @@ async function loadAdmin() {
         <li><span>Routing rules → <b>Catch-all</b> → Send to Worker.</span></li>
       </ol></details>
     <div class="divider"></div>
-    <label class="lbl">Sending from bot addresses (SMTP for the domain — e.g. Resend, Mailgun, Brevo, SES)</label>
+    <label class="lbl">Outgoing email (password resets and optional bot addresses)</label>
+    <p class="small muted">Use the open-source Stalwart option above or an SMTP provider you trust. These credentials are stored encrypted on your server.</p>
     <div class="grid2"><div class="field"><label class="lbl small">SMTP server</label><input data-admin="bot_smtp_host" value="${esc(a.bot_smtp_host)}" placeholder="smtp.resend.com"></div><div class="field"><label class="lbl small">Port</label><input data-admin="bot_smtp_port" value="${esc(a.bot_smtp_port)}" placeholder="587"></div></div>
     <div class="grid2"><div class="field"><label class="lbl small">Username</label><input data-admin="bot_smtp_user" value="${esc(a.bot_smtp_user)}"></div><div class="field"><label class="lbl small">Password / API key</label><input type="password" data-admin="bot_smtp_pass" value="${esc(a.bot_smtp_pass)}" autocomplete="new-password"></div></div>
     <button class="btn sm" data-act="saveAdmin" data-busy="Saving…">Save</button>`;
