@@ -10,6 +10,8 @@ name: Deploy to VPS
 on:
   push:
     branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 concurrency:
@@ -26,9 +28,12 @@ jobs:
           node-version: '22'
       - name: Check JavaScript syntax
         run: find src public scripts tests -name '*.js' -print0 | xargs -0 -n1 node --check
-      - name: Run regression tests
+      - name: Install dependencies for full integration tests
+        run: npm ci --no-audit --no-fund
+      - name: Run regression and integration tests
         run: node --test tests/*.test.js
   ssh-deploy:
+    if: github.event_name != 'pull_request'
     needs: validate
     runs-on: ubuntu-latest
     env:
@@ -84,6 +89,7 @@ jobs:
             $DOCKER logs --tail 30 "$ID"
 
   hostinger-deploy:
+    if: github.event_name != 'pull_request'
     needs: validate
     runs-on: ubuntu-latest
     env:

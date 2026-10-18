@@ -79,7 +79,9 @@ const empty = (ico, text) => `<div class="empty"><div class="ei">${ico}</div>${t
 // ---------- boot ----------
 async function boot() {
   try { S.pub = await api('/api/public'); } catch (_) { S.pub = { botName: 'Air Agent', signupOpen: false }; }
-  try { S.me = await api('/api/me'); } catch (_) { return renderAuth(S.pub.firstUser ? 'signup' : 'login'); }
+  // Reset links work even if this browser is already logged in to another account.
+  if (/^#\/reset(?:\?|$)/.test(location.hash)) return renderAuth('reset');
+  try { S.me = await api('/api/me'); } catch (_) { const mode = (location.hash.match(/^#\/(reset|forgot|signup|login)(?:\?|$)/) || [])[1]; return renderAuth(mode || (S.pub.firstUser ? 'signup' : 'login')); }
   try { const t = sessionStorage.getItem('target'); if (t === 'house' && S.me.user.is_admin) S.target = 'house'; } catch (_) {}
   await loadSettings();
   window.addEventListener('hashchange', route);
@@ -107,69 +109,129 @@ function route() {
 
 // ---------- landing / sign-in ----------
 function renderAuth(mode) {
+  if (mode === 'forgot' || mode === 'reset') return renderRecoveryAuth(mode);
   const signup = mode === 'signup';
   const first = S.pub.firstUser;
   $('#root').innerHTML = `
   <div class="landing">
-    <div class="top">${LOGO}<span>${esc(S.pub.botName)}</span></div>
+    <div class="top">${LOGO}<span>${esc(S.pub.botName)}</span><span class="topHint">Your WhatsApp. A lot less work.</span></div>
     <div class="hero">
       <div class="l">
-        <h1>Your WhatsApp, now with an <b>AI assistant</b>.<br>Scan any WhatsApp number — done.</h1>
-        <ol class="wsteps">
-          <li><span>${first ? 'Create the admin account for this server' : signup ? 'Create your free account' : 'Log in to your account'}</span></li>
-          <li><span>On your phone open WhatsApp → <b>Linked devices</b> → <b>Link a device</b></span></li>
-          <li>Scan the QR code. Your AI is live — it only answers who you choose.</li>
-        </ol>
-        <div class="sub">Works with personal and WhatsApp Business numbers. Text, voice notes, groups.</div>
+        <span class="eyebrow">YOUR WHATSAPP AI ASSISTANT</span>
+        <h1>More time for business.<br><b>Less time answering chats.</b></h1>
+        <p class="landingLead">Air Agent helps you reply to customers, understand voice notes, and stay on top of messages. No coding. No confusing setup.</p>
+        <div class="landingSteps">
+          <div><span class="stepNum">1</span><span><b>Create your account</b><small>Just your email and a password.</small></span></div>
+          <div><span class="stepNum">2</span><span><b>Connect WhatsApp</b><small>Scan a QR code from Linked devices.</small></span></div>
+          <div><span class="stepNum">3</span><span><b>Choose who gets replies</b><small>You're in control. Start with just yourself.</small></span></div>
+        </div>
+        <div class="trustLine">✓ Simple setup &nbsp; ✓ You stay in control &nbsp; ✓ Voice notes supported</div>
       </div>
       <div class="r">
-        <h2 style="font-size:20px;font-weight:400;margin-bottom:18px">${first ? 'Set up your server' : signup ? 'Create your account' : 'Log in'}</h2>
+        <div class="authHeader"><span class="authGlyph">✦</span><h2>${first ? 'Create the administrator account' : signup ? 'Create your Air Agent account' : 'Welcome back'}</h2><p>${first ? 'Set up your private Air Agent server.' : signup ? 'Start with your own WhatsApp AI.' : 'Sign in to manage your WhatsApp assistant.'}</p></div>
         <form id="authForm" class="stack">
-          ${signup ? '<div><label class="lbl" for="aName">Your name</label><input id="aName" autocomplete="name"></div>' : ''}
-          <div><label class="lbl" for="aEmail">Email</label><input id="aEmail" type="email" autocomplete="email" required></div>
-          <div><label class="lbl" for="aPass">Password</label><input id="aPass" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" required minlength="8"></div>
-          <div class="hint" id="aErr" style="color:var(--danger)"></div>
-          <button class="btn lg" type="submit" style="width:100%;justify-content:center">${signup ? 'Create account' : 'Log in'}</button>
+          ${signup ? '<div><label class="lbl" for="aName">Your name</label><input id="aName" autocomplete="name" placeholder="Your name" required></div>' : ''}
+          <div><label class="lbl" for="aEmail">Email address</label><input id="aEmail" type="email" autocomplete="email" placeholder="you@business.com" required></div>
+          <div><div class="authLabel"><label class="lbl" for="aPass">Password</label>${!signup ? '<a href="#/forgot" id="aForgot">Forgot password?</a>' : ''}</div>
+            <div class="passwordInput"><input id="aPass" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" placeholder="Enter your password" required minlength="8"><button type="button" id="aShowPass" aria-label="Show or hide password">Show</button></div></div>
+          <div class="hint" id="aErr" role="alert"></div>
+          <button class="btn lg authSubmit" id="aSubmit" type="submit">${signup ? 'Create account' : 'Sign in'} <span>→</span></button>
         </form>
-        ${S.pub.signupOpen && !first ? `<p class="small muted" style="margin-top:16px;text-align:center">${signup ? 'Already have an account?' : 'New here?'} <a href="#" id="aSwitch">${signup ? 'Log in' : 'Create an account'}</a></p>` : ''}
-        ${!S.pub.signupOpen && !signup ? '<p class="small faint" style="margin-top:16px;text-align:center">New accounts are created by the admin.</p>' : ''}
-        <div class="lock" style="margin-top:18px">🔒 Your chats stay on this server. The AI only answers who you allow.</div>
+        ${S.pub.signupOpen && !first ? `<p class="authBottom">${signup ? 'Already have an account?' : 'New to Air Agent?'} <a href="#/${signup ? 'login' : 'signup'}" id="aSwitch">${signup ? 'Sign in' : 'Create an account'}</a></p>` : ''}
+        ${!S.pub.signupOpen && !signup ? '<p class="authBottom muted">Need an account? Ask your Air Agent administrator.</p>' : ''}
+        <div class="authPrivacy">🔒 Your account is protected. Your AI only replies when you allow it.</div>
       </div>
     </div>
     <div class="feats">
-      <div class="feat"><div class="fi">💬</div><b>Replies like you</b><span>Answers only you, people you pick, or everyone. Steps back when you reply.</span></div>
-      <div class="feat"><div class="fi">🧠</div><b>Knows your business</b><span>Upload price lists, menus and FAQs — it answers from them.</span></div>
-      <div class="feat"><div class="fi">🎙️</div><b>Hears voice notes</b><span>Understands voice notes and can answer by voice.</span></div>
-      <div class="feat"><div class="fi">⚡</div><b>Gets things done</b><span>Emails, calls, reminders and messages — just ask in WhatsApp.</span></div>
+      <div class="feat"><div class="fi">💬</div><b>Customer replies</b><span>Answer common questions while you focus on work.</span></div>
+      <div class="feat"><div class="fi">🎙️</div><b>Voice notes</b><span>Understand audio messages automatically.</span></div>
+      <div class="feat"><div class="fi">📚</div><b>Knows your business</b><span>Teach it prices, hours and frequently asked questions.</span></div>
+      <div class="feat"><div class="fi">🛡️</div><b>You're in control</b><span>Pick exactly who can get an automated reply.</span></div>
     </div>
-    <div class="legal">${esc(S.pub.botName)} is an independent product. It is not affiliated with, endorsed by or sponsored by WhatsApp or Meta.</div>
+    <div class="legal">${esc(S.pub.botName)} is independent of WhatsApp and Meta. Linked-device connections may be restricted by WhatsApp.</div>
   </div>`;
-  $('#aSwitch')?.addEventListener('click', (e) => { e.preventDefault(); renderAuth(signup ? 'login' : 'signup'); });
+  $('#aSwitch')?.addEventListener('click', (e) => { e.preventDefault(); location.hash = signup ? '#/login' : '#/signup'; renderAuth(signup ? 'login' : 'signup'); });
+  $('#aForgot')?.addEventListener('click', (e) => { e.preventDefault(); location.hash = '#/forgot'; renderAuth('forgot'); });
+  $('#aShowPass')?.addEventListener('click', () => {
+    const input = $('#aPass'); input.type = input.type === 'password' ? 'text' : 'password';
+    $('#aShowPass').textContent = input.type === 'password' ? 'Show' : 'Hide';
+  });
   $('#authForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     $('#aErr').textContent = '';
+    const submit = $('#aSubmit'); submit.disabled = true; submit.textContent = 'One moment…';
     try {
       await api('/api/' + (signup ? 'signup' : 'login'), { body: { email: $('#aEmail').value, password: $('#aPass').value, name: $('#aName')?.value } });
-      location.hash = '#/home'; boot();
-    } catch (err) { $('#aErr').textContent = err.message; }
+      location.hash = '#/home'; await boot();
+    } catch (err) { $('#aErr').textContent = err.message; submit.disabled = false; submit.textContent = signup ? 'Create account →' : 'Sign in →'; }
+  });
+}
+
+function renderRecoveryAuth(mode) {
+  const reset = mode === 'reset';
+  const token = new URLSearchParams((location.hash.split('?')[1] || '')).get('token') || '';
+  const tokenValid = /^[a-f0-9]{64}$/i.test(token);
+  $('#root').innerHTML = `
+  <div class="landing recoveryLanding">
+    <div class="top">${LOGO}<span>${esc(S.pub.botName)}</span></div>
+    <div class="recoveryPanel">
+      <div class="recoveryIcon">${reset ? '🔐' : '✉️'}</div>
+      <h1>${reset ? 'Choose a new password' : 'Forgot your password?'}</h1>
+      <p class="muted">${reset ? 'Create a strong new password for your Air Agent account.' : 'Enter the email address you use to sign in. We’ll email you a private reset link.'}</p>
+      ${!reset && S.pub.passwordRecoveryReady === false ? '<div class="recoveryInfo">Email recovery isn’t set up on this server yet. Ask your Air Agent administrator to enable it in Admin → Password recovery.</div>' : ''}
+      ${reset && !tokenValid ? '<div class="recoveryInfo">This link is invalid. Please request a new password-reset email.</div>' : `
+      <form id="recoveryForm" class="stack">
+        ${reset ? `<div><label class="lbl" for="newPassword">New password (10–72 characters)</label><input type="password" id="newPassword" autocomplete="new-password" minlength="10" maxlength="72" required></div>
+         <div><label class="lbl" for="confirmPassword">Confirm new password</label><input type="password" id="confirmPassword" autocomplete="new-password" minlength="10" maxlength="72" required></div>` :
+          '<div><label class="lbl" for="recoveryEmail">Your account email</label><input id="recoveryEmail" type="email" autocomplete="email" placeholder="you@business.com" required></div>'}
+        <div id="recoveryNotice" role="status" class="hint"></div>
+        <button id="recoverySubmit" type="submit" class="btn lg authSubmit">${reset ? 'Change password' : 'Email me a reset link'} <span>→</span></button>
+      </form>`}
+      <a href="#/login" id="backToLogin" class="authBack">← Back to sign in</a>
+    </div>
+  </div>`;
+  $('#backToLogin').addEventListener('click', (e) => { e.preventDefault(); location.hash = '#/login'; renderAuth('login'); });
+  $('#recoveryForm')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const note = $('#recoveryNotice'); note.textContent = '';
+    const submit = $('#recoverySubmit'); submit.disabled = true; submit.textContent = 'Working…';
+    try {
+      if (reset) {
+        const password = $('#newPassword').value;
+        if (password !== $('#confirmPassword').value) throw new Error('Passwords do not match.');
+        const result = await api('/api/password/reset', { body: { token, password } });
+        $('#recoveryForm').innerHTML = `<div class="banner ok"><div class="bi">✓</div><div>${esc(result.message)}</div></div><a class="btn" href="#/login" id="resetDone">Sign in with new password →</a>`;
+        $('#resetDone').addEventListener('click', e => { e.preventDefault(); location.hash = '#/login'; renderAuth('login'); });
+      } else {
+        const result = await api('/api/password/forgot', { body: { email: $('#recoveryEmail').value } });
+        note.textContent = result.message;
+        note.className = 'recoverySuccess';
+        submit.textContent = 'Send another link';
+        submit.disabled = false;
+        return;
+      }
+    } catch (err) { note.textContent = err.message; note.className = 'recoveryError'; submit.disabled = false; submit.textContent = reset ? 'Change password' : 'Email me a reset link'; }
   });
 }
 
 // ---------- shell ----------
-const NAV = [
-  ['home', '🏠', 'Home'],
-  ['replies', '💬', 'Reply rules'],
-  ['brain', '🧠', 'Knowledge & prompts'],
-  ['actions', '⚡', 'Actions'],
-  ['email', '📧', 'Bot email'],
-  ['voice', '🎙️', 'Voice notes'],
-  ['model', '🤖', 'AI model'],
+const MAIN_NAV = [
+  ['home', '🏠', 'Overview'],
+  ['replies', '💬', 'Who gets replies'],
+  ['brain', '📚', 'Teach your AI'],
   ['chats', '🗂️', 'Conversations'],
-  ['playground', '🧪', 'Test your AI'],
-  ['-'],
+  ['playground', '✨', 'Try your AI'],
+];
+const MORE_NAV = [
+  ['voice', '🎙️', 'Voice notes'],
+  ['actions', '⚡', 'Automations'],
+  ['model', '🤖', 'AI model'],
+  ['email', '📧', 'Email'],
   ['account', '👤', 'Account'],
   ['admin', '🛡️', 'Admin', true],
 ];
+const navEntry = ([id, ico, label, adm]) => adm && !S.me.user.is_admin ? '' :
+  `<a href="#/${id}" class="${S.page === id ? 'active' : ''}"><span class="ico">${ico}</span>${label}</a>`;
 
 function renderShell() {
   clearInterval(S.poll);
@@ -186,7 +248,14 @@ function renderShell() {
         <select id="targetSel"><option value="mine" ${S.target === 'mine' ? 'selected' : ''}>My WhatsApp</option><option value="house" ${S.target === 'house' ? 'selected' : ''}>Shared Air number</option></select>` : '<div class="small faint">My WhatsApp</div>'}
         <div class="row between" style="margin-top:8px">${statusPill}<span class="small muted mono">${S.wa?.me?.phone ? '+' + esc(S.wa.me.phone) : ''}</span></div>
       </div>
-      <nav class="nav">${NAV.map(([id, ico, label, adm]) => id === '-' ? '<div class="sep"></div>' : (adm && !isAdmin ? '' : `<a href="#/${id}" class="${S.page === id ? 'active' : ''}"><span class="ico">${ico}</span>${label}</a>`)).join('')}</nav>
+      <nav class="nav" aria-label="Main navigation">
+        <div class="navCaption">YOUR ASSISTANT</div>
+        ${MAIN_NAV.map(navEntry).join('')}
+        <details class="navMore" ${MORE_NAV.some(([id]) => id === S.page) ? 'open' : ''}>
+          <summary>⚙️ More settings <span aria-hidden="true">⌄</span></summary>
+          <div class="navMoreItems">${MORE_NAV.map(navEntry).join('')}</div>
+        </details>
+      </nav>
       <div class="foot"><div class="faint small">${esc(S.me.user.email)} · v${esc(S.me.version)}</div><div class="row"><button class="btn ghost sm" data-act="theme">◐ Theme</button><button class="btn ghost sm" data-act="logout">Log out</button></div></div>
     </aside>
     <div class="mainwrap"><main class="main" id="main"></main></div>
@@ -275,6 +344,7 @@ document.addEventListener('click', async (e) => {
 });
 
 const ACTIONS = {
+  jumpConnect: () => document.querySelector('#connectCard')?.scrollIntoView({ behavior: 'smooth', block: 'center' }),
   menu: () => $('#side').classList.toggle('open'),
   theme: () => {
     const cur = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
@@ -312,38 +382,54 @@ const PAGES = {};
 // ---------- HOME ----------
 PAGES.home = {
   render() {
-    const st = S.wa?.status || 'idle';
-    const op = o();
-    const who = { me: 'Only you', allow: 'Only the people you chose', everyone: 'Everyone who messages you' }[op.reply_mode];
-    const grp = { off: 'Off', mention: 'Any group, when @mentioned', selected: `${(op.selected_groups || []).length} chosen group(s)` }[op.group_mode];
-    const house = S.target === 'house';
-    const banners = [];
-    if (!S.draft.enabled) banners.push(`<div class="banner warn"><div class="bi">⏸️</div><div><b>Your AI is turned off.</b> It won't answer anyone until you turn it back on.</div></div>`);
-    if (!house && op.reply_mode === 'everyone') banners.push(`<div class="banner warn"><div class="bi">⚠️</div><div><b>Your AI answers everyone who messages you</b> — including strangers and spam. Choose <a href="#/replies">Only the people you choose</a> if that's not what you want. Block numbers there too.</div></div>`);
-    return `
-      <div class="pagehead"><div><h1>${house ? 'Shared Air number' : `Hi ${esc(S.me.user.name || '')}`.trim()}</h1><p>${house ? 'Anyone who messages this number gets AI replies.' : 'Your AI assistant on WhatsApp.'}</p></div></div>
-      ${banners.join('')}
-      ${st !== 'open' ? `<section class="card" id="connectCard">${connectBody(st)}</section>` : ''}
-      <div class="${st === 'open' ? 'grid2' : ''}">
-        ${st === 'open' ? `<section class="card" id="connectCard">${connectBody(st)}</section>` : ''}
-        <section class="card">
-          <div class="head"><div><h2>Quick controls</h2><p>The most important switches.</p></div></div>
-          <div class="sw"><div><div class="t">AI is ${S.draft.enabled ? 'on' : 'off'}</div><div class="d">Master switch for this number.</div></div>
-            <label class="toggle"><input type="checkbox" data-field="enabled" id="masterSw" ${S.draft.enabled ? 'checked' : ''}><span></span></label></div>
-          <div class="sw"><div><div class="t">Who it answers</div><div class="d">${house ? 'Everyone (shared number)' : esc(who)}</div></div><a class="btn ghost sm" href="#/replies">Change</a></div>
-          <div class="sw"><div><div class="t">Groups</div><div class="d">${esc(grp)}</div></div><a class="btn ghost sm" href="#/replies">Change</a></div>
-          <div class="sw"><div><div class="t">Knowledge</div><div class="d" id="kbSum">Loading…</div></div><a class="btn ghost sm" href="#/brain">Manage</a></div>
-        </section>
-      </div>
-      <div class="stats" id="stats"></div>
-      ${card('Recent activity', 'What your AI did. Message contents stay private in Conversations.', '<div class="feed" id="feed"><div class="muted">Loading…</div></div>', '<a class="btn ghost sm" href="#/chats">Conversations</a>')}
-      ${!house ? card('How to use it', '', `
-        <div class="grid3">
-          <div><h3>💬 Talk to it</h3><p class="muted small">Open <b>"Message yourself"</b> in WhatsApp and chat or send voice notes.</p></div>
-          <div><h3>⚡ Ask it to do things</h3><p class="muted small">"Email dan@acme.com that the order shipped", "remind me at 4pm to call Mike".</p></div>
-          <div><h3>🪄 Use it anywhere</h3><p class="muted small">In any chat, start with <code>${esc(op.trigger_word || '/ai')}</code> — e.g. <code>${esc(op.trigger_word || '/ai')} translate to Hebrew</code>.</p></div>
-        </div>`) : ''}`;
-  },
+  const st = S.wa?.status || 'idle';
+  const op = o();
+  const house = S.target === 'house';
+  const connected = st === 'open';
+  const hasInfo = !!String(op.about || '').trim() || !!(op.faq || []).length;
+  const audience = { me: 'Just me (safe default)', allow: 'Only chosen people', everyone: 'Everyone who messages' }[op.reply_mode] || 'Just me';
+  const banners = [];
+  if (!S.draft.enabled) banners.push('<div class="banner warn"><div class="bi">⏸️</div><div><b>AI replies are turned off.</b> Turn them back on using the switch below.</div></div>');
+  if (!house && op.reply_mode === 'everyone') banners.push('<div class="banner warn"><div class="bi">⚠️</div><div><b>Your AI can answer anyone who messages you.</b> This can include unknown contacts. <a href="#/replies">Change who it answers</a>.</div></div>');
+  return `
+    <div class="pagehead homeHead">
+      <div><span class="eyebrow">AIR AGENT DASHBOARD</span><h1>${house ? 'Shared WhatsApp assistant' : `Hi${S.me.user.name ? `, ${esc(S.me.user.name.split(' ')[0])}` : ''} 👋`}</h1><p>Let's make WhatsApp easier. Start here — no technical knowledge needed.</p></div>
+      ${connected ? pill('ok','WhatsApp connected') : pill('warn','1 step to get started')}
+    </div>
+    ${banners.join('')}
+    <section class="homeIntro">
+      <div><span class="eyebrow">YOUR NEXT STEP</span>
+        <h2>${connected ? 'Your WhatsApp is connected.' : 'Connect your WhatsApp in a few taps.'}</h2>
+        <p>${connected ? 'Now decide who the AI should reply to, and teach it the basics about your business.' : 'Open WhatsApp → Linked devices → Link a device. Scan the QR code. That’s it.'}</p>
+        <div class="row"><a href="${connected ? '#/replies' : '#/home'}" ${connected ? '' : 'data-act="jumpConnect"'} class="btn lg">${connected ? 'Choose who gets AI replies →' : 'Connect WhatsApp ↓'}</a>
+        ${connected ? '<a class="btn ghost" href="#/playground">Try your AI</a>' : ''}</div>
+      </div><div class="homeIntroMark" aria-hidden="true">${connected ? '✓' : '💬'}</div>
+    </section>
+    <div class="setupHead"><h2>Get started in 3 simple steps</h2><span>Everything can be changed later</span></div>
+    <div class="setupGrid">
+      <a class="setupCard" href="#/home" ${connected ? '' : 'data-act="jumpConnect"'}><div class="setupIcon">${connected ? '✓' : '1'}</div>
+        <div class="setupBody"><b>Connect WhatsApp</b><p>${connected ? `Connected to +${esc(S.wa.me?.phone || '')}` : 'Scan the QR code from your phone'}</p><span class="setupLink">${connected ? 'Connected' : 'Connect now →'}</span></div></a>
+      <a class="setupCard" href="#/replies"><div class="setupIcon">2</div>
+        <div class="setupBody"><b>Choose who the AI answers</b><p>Currently: ${esc(audience)}</p><span class="setupLink">Change replies →</span></div></a>
+      <a class="setupCard" href="#/brain"><div class="setupIcon">${hasInfo ? '✓' : '3'}</div>
+        <div class="setupBody"><b>Teach it about your business</b><p>${hasInfo ? 'You have started teaching your assistant' : 'Add your opening hours, prices and FAQs'}</p><span class="setupLink">${hasInfo ? 'Manage information →' : 'Add business details →'}</span></div></a>
+    </div>
+    <div class="${connected ? 'grid2' : ''}">
+      <section class="card" id="connectCard">${connectBody(st)}</section>
+      <section class="card simpleControls">
+        <div class="head"><div><h2>Quick controls</h2><p>No complicated settings.</p></div></div>
+        <div class="sw"><div><div class="t">AI replies ${S.draft.enabled ? 'ON' : 'OFF'}</div><div class="d">Pause or resume this number’s AI.</div></div><label class="toggle"><input type="checkbox" data-field="enabled" id="masterSw" ${S.draft.enabled ? 'checked' : ''} aria-label="Turn AI on or off"><span></span></label></div>
+        <div class="sw"><div><div class="t">Who gets AI replies?</div><div class="d">${esc(audience)}</div></div><a class="btn ghost sm" href="#/replies">Change</a></div>
+        <div class="sw"><div><div class="t">Business knowledge</div><div class="d" id="kbSum">Checking…</div></div><a class="btn ghost sm" href="#/brain">Manage</a></div>
+        <div class="sw"><div><div class="t">Voice messages</div><div class="d">${op.voice_in ? 'AI can understand incoming voice notes' : 'Voice understanding is off'}</div></div><a class="btn ghost sm" href="#/voice">Change</a></div>
+      </section>
+    </div>
+    <div class="setupHead"><h2>What your assistant has been doing</h2><a href="#/chats">View conversations →</a></div>
+    <div class="stats" id="stats"></div>
+    ${card('Recent activity','Messages handled and important actions.','<div class="feed" id="feed"><div class="muted">Loading activity…</div></div>')}
+    <section class="helpStrip"><div><b>Want to test your AI before customers see it?</b><p>Try a message in the test area. It won’t send anything to a real contact.</p></div><a class="btn ghost" href="#/playground">Test a message →</a></section>
+  `;
+},
   async after() {
     pollStatus();
     api('/api/kb' + tq()).then((d) => { $('#kbSum') && ($('#kbSum').textContent = `${d.length} file(s)/note(s), ${(o().faq || []).length} FAQ`); }).catch(() => {});
@@ -1027,6 +1113,7 @@ PAGES.admin = {
         <div class="grid3"><div class="field"><label class="lbl">Name</label><input id="nuName"></div><div class="field"><label class="lbl">Email</label><input id="nuEmail" type="email"></div><div class="field"><label class="lbl">Temporary password</label><input id="nuPass" type="text" minlength="8"></div></div>
         <button class="btn sm" data-act="newUser" data-busy="Creating…">Create user</button></details>`)}
     ${card('Bot email domain', 'Lets every user claim an address like name@yourdomain for their assistant.', '<div id="aMail" class="muted">Loading…</div>')}
+    ${card('Password recovery', 'Let customers securely reset forgotten passwords by email.', '<div id="aRecovery" class="muted">Loading…</div>')}
     ${card('Speech API (optional)', 'Used by "Speech API" voice mode for people without their own provider. Any OpenAI-compatible /audio endpoint (e.g. Groq).', '<div id="aVoice" class="muted">Loading…</div>')}`;
   },
   async after() { await loadAdmin(); },
@@ -1085,6 +1172,19 @@ async function loadAdmin() {
     <div class="field"><label class="lbl">Model</label><input data-admin="voice_api_model" value="${esc(a.voice_api_model)}" placeholder="whisper-large-v3-turbo"></div>
     <div class="field"><label class="lbl">API key</label><input type="password" data-admin="voice_api_key" value="${esc(a.voice_api_key)}" autocomplete="new-password"></div></div>
     <button class="btn sm" data-act="saveAdmin" data-busy="Saving…">Save</button>`;
+  $('#aRecovery').innerHTML = `
+    <div class="banner ${a.passwordRecoveryReady ? 'ok' : 'warn'}" style="margin-bottom:14px">
+      <div class="bi">${a.passwordRecoveryReady ? '✓' : '✉️'}</div>
+      <div><b>${a.passwordRecoveryReady ? 'Reset email is configured' : 'Reset email needs setup'}</b>
+        <div class="small">${a.passwordRecoveryReady ? 'Users can request 20-minute password reset links from the login page. Send a test email to verify delivery.' : 'Enter the SMTP host, username and password in Bot email domain above, save, and verify that mail can be delivered.'}</div>
+      </div>
+    </div>
+    <div class="field"><label class="lbl">Password-reset sender email (optional)</label>
+      <input type="email" data-admin="reset_email_from" placeholder="support@yourdomain.com" value="${esc(a.reset_email_from || '')}">
+      <div class="hint">Leave blank to use the SMTP username. This email should be authorized to send through your SMTP provider.</div></div>
+    <button class="btn sm" data-act="saveAdmin" data-busy="Saving…">Save recovery settings</button>
+    <p class="small muted" style="margin-top:10px">Recovery links use the HTTPS address agent.llama2.com by default. Set PUBLIC_URL to your verified HTTPS origin if you move domains. Never set it from a request Host header.</p>
+  `;
   $('#aMail').innerHTML = `
     <div class="grid2"><div class="field"><label class="lbl">Mail domain</label><input data-admin="mail_domain" value="${esc(a.mail_domain)}" placeholder="bots.airbiz.ai"><div class="hint">A domain or subdomain you control, used only for bot addresses.</div></div>
     <div class="field"><label class="lbl">Incoming mail webhook</label><input readonly value="${esc(a.inbound_url)}"><div class="hint">Header <code>X-Inbound-Secret: ${esc(a.inbound_secret)}</code></div></div></div>

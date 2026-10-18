@@ -112,3 +112,20 @@ Alternatively, set `GROQ_API_KEY` in the server environment (not tracked in git)
 **Cost controls:** AI responses use a low reasoning effort on Groq GPT-OSS, capped completion size, bounded conversation context, and automatic 1.2-second batching of consecutive inbound private texts. Replayed WhatsApp events are deduplicated within the running process. Per-number default daily allowances (UTC) are 300 LLM calls (multiple tool turns each count) and 3,600 voice-note seconds; adjust them under Admin. Voice notes over five minutes and audio attachments over 15 MB are declined. Local models consume server CPU/RAM; having 50 GB free storage is not a RAM or GPU specification.
 
 **Deploy:** A push to `main` triggers the existing VPS workflow, preceded by Node.js syntax checks and regression tests. Built-in auto-update is also available when the running deployment follows main. Check the Actions run and the app `/health` endpoint and send a test WhatsApp voice message before declaring the deployment verified. Official WhatsApp Business Platform integration is advisable for commercial production because unofficial linked-device methods can be restricted.
+
+
+## V2.3 customer-friendly setup and forgot-password recovery
+
+Air Agent's homepage guides nontechnical owners through 1) scanning WhatsApp, 2) deciding who gets replies, and 3) adding basic business information. Advanced menus are under **More settings**.
+
+### Password recovery
+- On the login screen select **Forgot password?**. Enter the account email, then use the reset link from your inbox. A link works once and expires after **20 minutes**.
+- Reset tokens are cryptographically random, stored only as SHA-256 hashes, and deleted when used. Passwords are hashed with bcrypt, and all previously logged-in sessions are invalidated on reset.
+- Reset requests provide the same message for real or unknown email addresses, include per-IP rate limiting and five-minute per-account cooldown, and do not reveal the token via API responses or logs.
+- The application uses the server's existing **Admin → Bot email domain → SMTP server, username and password** settings for reset email, even when you do not assign individual bot email addresses. Configure these as administrator and use a provider that supports SMTP.
+- Under **Admin → Password recovery**, optionally set the sending email address. It must be a verified/authorized sender for your SMTP provider. Users see a configuration warning until the SMTP host, username and password are saved.
+- Password reset links point to `https://agent.llama2.com` by default, **not** an untrusted Host header. On other domains set `PUBLIC_URL=https://your-verified-domain.example` in the server environment. HTTPS is required.
+- Reset emails cannot be guaranteed to arrive until an administrator configures working SMTP, DNS sender authentication (SPF/DKIM, as needed), and tests delivery.
+
+### Production safety
+- GitHub checks JavaScript parsing plus unit and HTTP/SQLite integration tests before deployment. Do not advertise production readiness until visiting `/health`, testing WhatsApp QR linking, confirming email delivery, and successfully resetting a real account password.

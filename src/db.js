@@ -23,6 +23,14 @@ CREATE TABLE IF NOT EXISTS auth_tokens (
   user_id INTEGER NOT NULL,
   created_at INTEGER DEFAULT (strftime('%s','now'))
 );
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  token_hash TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_reset_user ON password_reset_tokens(user_id);
 CREATE TABLE IF NOT EXISTS settings (
   session_id TEXT PRIMARY KEY,
   persona TEXT,
@@ -216,6 +224,12 @@ const q = {
                            WHERE t.token = ? AND t.created_at > strftime('%s','now') - 7776000`),
   deleteToken: db.prepare('DELETE FROM auth_tokens WHERE token = ?'),
   deleteUserTokens: db.prepare('DELETE FROM auth_tokens WHERE user_id = ?'),
+  recentPasswordReset: db.prepare('SELECT created_at FROM password_reset_tokens WHERE user_id = ? AND created_at > ? ORDER BY created_at DESC LIMIT 1'),
+  deletePasswordResets: db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?'),
+  issuePasswordReset: db.prepare('INSERT INTO password_reset_tokens (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'),
+  revokePasswordReset: db.prepare('DELETE FROM password_reset_tokens WHERE token_hash = ?'),
+  consumePasswordReset: db.prepare('DELETE FROM password_reset_tokens WHERE token_hash = ? AND expires_at > ? RETURNING user_id'),
+  prunePasswordResets: db.prepare('DELETE FROM password_reset_tokens WHERE expires_at <= ?'),
   listUsers: db.prepare('SELECT id, email, name, is_admin, created_at FROM users ORDER BY id DESC'),
   // Persistent per-number daily limits (UTC); count failed calls against limit.
   claimAi: db.prepare(`INSERT INTO daily_ai_usage (session_id, day, calls) VALUES (?, date('now'), 1)
@@ -299,7 +313,7 @@ const APP_DEFAULTS = {
   ai_daily_limit: '300',
   voice_daily_seconds: '3600',
   mail_domain: '',      // e.g. bots.airbiz.ai  -> each bot can claim name@bots.airbiz.ai
-  bot_smtp_host: '', bot_smtp_port: '587', bot_smtp_user: '',
+  bot_smtp_host: '', bot_smtp_port: '587', bot_smtp_user: '', reset_email_from: '',
 };
 function getApp(key) { const r = q.getApp.get(key); return r ? r.value : APP_DEFAULTS[key]; }
 function setApp(key, value) { q.setApp.run(key, String(value ?? '')); }
