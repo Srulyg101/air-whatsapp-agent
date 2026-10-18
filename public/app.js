@@ -342,6 +342,7 @@ document.addEventListener('click', async (e) => {
 });
 
 const ACTIONS = {
+  jumpConnect: () => document.querySelector('#connectCard')?.scrollIntoView({ behavior: 'smooth', block: 'center' }),
   menu: () => $('#side').classList.toggle('open'),
   theme: () => {
     const cur = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
@@ -398,13 +399,13 @@ PAGES.home = {
       <div><span class="eyebrow">YOUR NEXT STEP</span>
         <h2>${connected ? 'Your WhatsApp is connected.' : 'Connect your WhatsApp in a few taps.'}</h2>
         <p>${connected ? 'Now decide who the AI should reply to, and teach it the basics about your business.' : 'Open WhatsApp → Linked devices → Link a device. Scan the QR code. That’s it.'}</p>
-        <div class="row"><a href="${connected ? '#/replies' : '#connectCard'}" class="btn lg">${connected ? 'Choose who gets AI replies →' : 'Connect WhatsApp ↓'}</a>
+        <div class="row"><a href="${connected ? '#/replies' : '#/home'}" ${connected ? '' : 'data-act="jumpConnect"'} class="btn lg">${connected ? 'Choose who gets AI replies →' : 'Connect WhatsApp ↓'}</a>
         ${connected ? '<a class="btn ghost" href="#/playground">Try your AI</a>' : ''}</div>
       </div><div class="homeIntroMark" aria-hidden="true">${connected ? '✓' : '💬'}</div>
     </section>
     <div class="setupHead"><h2>Get started in 3 simple steps</h2><span>Everything can be changed later</span></div>
     <div class="setupGrid">
-      <a class="setupCard" href="${connected ? '#/home' : '#connectCard'}"><div class="setupIcon">${connected ? '✓' : '1'}</div>
+      <a class="setupCard" href="#/home" ${connected ? '' : 'data-act="jumpConnect"'}><div class="setupIcon">${connected ? '✓' : '1'}</div>
         <div class="setupBody"><b>Connect WhatsApp</b><p>${connected ? `Connected to +${esc(S.wa.me?.phone || '')}` : 'Scan the QR code from your phone'}</p><span class="setupLink">${connected ? 'Connected' : 'Connect now →'}</span></div></a>
       <a class="setupCard" href="#/replies"><div class="setupIcon">2</div>
         <div class="setupBody"><b>Choose who the AI answers</b><p>Currently: ${esc(audience)}</p><span class="setupLink">Change replies →</span></div></a>
@@ -1110,6 +1111,7 @@ PAGES.admin = {
         <div class="grid3"><div class="field"><label class="lbl">Name</label><input id="nuName"></div><div class="field"><label class="lbl">Email</label><input id="nuEmail" type="email"></div><div class="field"><label class="lbl">Temporary password</label><input id="nuPass" type="text" minlength="8"></div></div>
         <button class="btn sm" data-act="newUser" data-busy="Creating…">Create user</button></details>`)}
     ${card('Bot email domain', 'Lets every user claim an address like name@yourdomain for their assistant.', '<div id="aMail" class="muted">Loading…</div>')}
+    ${card('Password recovery', 'Let customers securely reset forgotten passwords by email.', '<div id="aRecovery" class="muted">Loading…</div>')}
     ${card('Speech API (optional)', 'Used by "Speech API" voice mode for people without their own provider. Any OpenAI-compatible /audio endpoint (e.g. Groq).', '<div id="aVoice" class="muted">Loading…</div>')}`;
   },
   async after() { await loadAdmin(); },
@@ -1168,6 +1170,19 @@ async function loadAdmin() {
     <div class="field"><label class="lbl">Model</label><input data-admin="voice_api_model" value="${esc(a.voice_api_model)}" placeholder="whisper-large-v3-turbo"></div>
     <div class="field"><label class="lbl">API key</label><input type="password" data-admin="voice_api_key" value="${esc(a.voice_api_key)}" autocomplete="new-password"></div></div>
     <button class="btn sm" data-act="saveAdmin" data-busy="Saving…">Save</button>`;
+  $('#aRecovery').innerHTML = `
+    <div class="banner ${a.passwordRecoveryReady ? 'ok' : 'warn'}" style="margin-bottom:14px">
+      <div class="bi">${a.passwordRecoveryReady ? '✓' : '✉️'}</div>
+      <div><b>${a.passwordRecoveryReady ? 'Reset email is configured' : 'Reset email needs setup'}</b>
+        <div class="small">${a.passwordRecoveryReady ? 'Users can request 20-minute password reset links from the login page. Send a test email to verify delivery.' : 'Enter the SMTP host, username and password in Bot email domain above, save, and verify that mail can be delivered.'}</div>
+      </div>
+    </div>
+    <div class="field"><label class="lbl">Password-reset sender email (optional)</label>
+      <input type="email" data-admin="reset_email_from" placeholder="support@yourdomain.com" value="${esc(a.reset_email_from || '')}">
+      <div class="hint">Leave blank to use the SMTP username. This email should be authorized to send through your SMTP provider.</div></div>
+    <button class="btn sm" data-act="saveAdmin" data-busy="Saving…">Save recovery settings</button>
+    <p class="small muted" style="margin-top:10px">Recovery links use the HTTPS address agent.llama2.com by default. Set PUBLIC_URL to your verified HTTPS origin if you move domains. Never set it from a request Host header.</p>
+  `;
   $('#aMail').innerHTML = `
     <div class="grid2"><div class="field"><label class="lbl">Mail domain</label><input data-admin="mail_domain" value="${esc(a.mail_domain)}" placeholder="bots.airbiz.ai"><div class="hint">A domain or subdomain you control, used only for bot addresses.</div></div>
     <div class="field"><label class="lbl">Incoming mail webhook</label><input readonly value="${esc(a.inbound_url)}"><div class="hint">Header <code>X-Inbound-Secret: ${esc(a.inbound_secret)}</code></div></div></div>
