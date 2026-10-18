@@ -99,3 +99,16 @@ WeChat is not connected yet. See [WeChat integration requirements](docs/wechat-i
   (WhatsApp Web protocol). WhatsApp may disconnect or restrict numbers that behave like bots — avoid
   mass messaging, and prefer the "Only me" / "People I choose" modes on personal numbers.
 - The first local voice note downloads the Whisper model (~80 MB) into the data volume.
+
+
+## Air Smart AI: low-cost managed provider
+
+Customers use the default **Air Smart AI** without their own API keys. On the admin page click **Select Groq GPT-OSS 20B + Whisper**; provide one Groq API key under **Air Smart AI**, then **Save**. This chooses the Groq chat-completions endpoint (`openai/gpt-oss-20b`) and Whisper Turbo speech-to-text. Never paste the key into GitHub or client-side JavaScript.
+
+Alternatively, set `GROQ_API_KEY` in the server environment (not tracked in git). When no admin AI provider is configured, the server picks managed GPT-OSS automatically. If neither Groq key nor admin provider is available, local Ollama and local Whisper remain available. The server's managed provider API cost is paid by the operator, not by individual customer accounts.
+
+**Voice notes:** On each connected number choose **Voice notes → Air Smart Voice** to use Groq Whisper when set up, or local Whisper if not. Incoming WhatsApp OGG/Opus voice notes are transcribed and passed to the text agent. This does not add WhatsApp voice call support or spoken reply synthesis. Test with English, Hebrew, Yiddish, and mixed-language audio before relying on multilingual accuracy.
+
+**Cost controls:** AI responses use a low reasoning effort on Groq GPT-OSS, capped completion size, bounded conversation context, and automatic 1.2-second batching of consecutive inbound private texts. Replayed WhatsApp events are deduplicated within the running process. Per-number default daily allowances (UTC) are 300 LLM calls (multiple tool turns each count) and 3,600 voice-note seconds; adjust them under Admin. Voice notes over five minutes and audio attachments over 15 MB are declined. Local models consume server CPU/RAM; having 50 GB free storage is not a RAM or GPU specification.
+
+**Deploy:** A push to `main` triggers the existing VPS workflow, preceded by Node.js syntax checks and regression tests. Built-in auto-update is also available when the running deployment follows main. Check the Actions run and the app `/health` endpoint and send a test WhatsApp voice message before declaring the deployment verified. Official WhatsApp Business Platform integration is advisable for commercial production because unofficial linked-device methods can be restricted.
