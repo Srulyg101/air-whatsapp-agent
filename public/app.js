@@ -748,6 +748,7 @@ PAGES.voice = {
       ${op.voice_in ? `
       <div class="field" style="margin-top:12px"><label class="lbl">Speech-to-text engine</label>
         ${cards('voice_engine', [
+          ['smart', 'Air Smart Voice (recommended)', 'Fast managed Whisper when enabled by admin, or local Whisper otherwise.', '⚡'],
           ['server', 'On this server (free)', 'Open-source Whisper runs on your VPS. Private. First voice note downloads the model (~80 MB) and is slower.', '🖥️'],
           ['api', 'Speech API (fast)', 'Uses your AI provider\'s Whisper (e.g. Groq) or the admin\'s speech API. Faster, better accuracy.', '⚡'],
         ])}</div>
@@ -768,7 +769,9 @@ PAGES.voice = {
     try {
       const s = await api('/api/voice/status' + tq());
       const st = { idle: 'not loaded yet (loads on the first voice note)', loading: 'loading…', ready: 'ready', error: 'error: ' + (s.local.error || '') }[s.local.status];
-      if ($('#whisperState') && o().voice_engine === 'server') $('#whisperState').textContent = `Server model ${s.model}: ${st}`;
+      if ($('#whisperState')) $('#whisperState').textContent = o().voice_engine === 'smart' ?
+         (s.managed ? 'Managed speech provider configured. Use Test it to verify.' : `Local fallback: ${s.model} — ${st}`) :
+         (o().voice_engine === 'server' ? `Local Whisper ${s.model}: ${st}` : (s.serverApi ? 'Speech API configured' : 'Speech API requires administrator setup'));
     } catch (_) {}
   },
   acts: {
@@ -821,7 +824,7 @@ PAGES.model = {
   render() {
     const op = o();
     if (!S.me.allowCustomAi) return `<div class="pagehead"><div><h1>AI model</h1><p>The brain behind your assistant.</p></div></div>
-      ${card('Server AI', '', '<p class="muted">Your account uses the server\'s open-source AI model.</p>')}
+      ${card('Server AI', '', '<p class="muted">Your account uses Air Smart AI, managed by your administrator. No personal API key needed.</p>')}
       ${S.me.user.is_admin
         ? card('OpenRouter sign-in is off', 'Enable personal AI providers to show the QR sign-in and model choices.', '<button class="btn lg" data-act="enableCustomAi" data-busy="Enabling…">Enable OpenRouter sign-in</button>')
         : card('OpenRouter sign-in is off', 'Ask your Air Agent administrator to enable “Users may use their own AI provider.” Then return here and choose Sign in & connect.')}`;
@@ -846,7 +849,7 @@ PAGES.model = {
     <div id="orQr"></div>
 
     ${card('Which AI answers', '', cards('ai_mode', [
-      ['server', 'Server AI (free)', 'Open-source model running on this server. Private, but less smart.', '🖥️'],
+      ['server', 'Air Smart AI', 'Uses the managed AI when enabled, otherwise open-source local AI. No key required.', '⚡'],
       ['custom', 'My connected AI', 'The smarter model you signed in to (or your own API key below).', '🔑'],
     ]))}
 
@@ -1017,7 +1020,7 @@ PAGES.admin = {
     <div class="stats" id="aStats"></div>
     <div class="grid2">
       ${card('Access', '', `<div id="aAccess" class="muted">Loading…</div>`)}
-      ${card('Server AI', 'Default model for everyone who doesn\'t bring their own.', '<div id="aAi" class="muted">Loading…</div>')}
+      ${card('Air Smart AI', 'Default model for everyone who doesn\'t bring their own.', '<div id="aAi" class="muted">Loading…</div>')}
     </div>
     ${card('Users', '', `<div id="aUsers" class="muted">Loading…</div>
       <details style="margin-top:14px"><summary>+ Create a user</summary>
@@ -1028,6 +1031,13 @@ PAGES.admin = {
   },
   async after() { await loadAdmin(); },
   acts: {
+    groqPreset: () => {
+      $('[data-admin="ai_base_url"]').value = 'https://api.groq.com/openai/v1';
+      $('[data-admin="ai_model"]').value = 'openai/gpt-oss-20b';
+      $('[data-admin="voice_api_base"]').value = 'https://api.groq.com/openai/v1';
+      $('[data-admin="voice_api_model"]').value = 'whisper-large-v3-turbo';
+      toast('Groq selected. Enter your Groq API key under Air Smart AI, then Save.');
+    },
     killAll: (b) => { if (prompt('This unlinks EVERY WhatsApp number from this server right now. Type DISCONNECT to confirm.') === 'DISCONNECT') busy(b, async () => { const r = await api('/api/admin/disconnect-all', { body: {} }); toast(`Disconnected ${r.count} session(s)`); await loadSettings(); loadAdmin(); }); },
     saveAdmin: (b) => busy(b, async () => {
       const body = {};
@@ -1057,10 +1067,14 @@ async function loadAdmin() {
     <button class="btn sm" style="margin-top:10px" data-act="saveAdmin" data-busy="Saving…">Save</button>`;
   const pulls = Object.entries(a.pulls || {}).map(([n, p]) => `<div class="small">${esc(n)}: ${esc(p.status)} ${esc(p.detail || '')}</div>`).join('');
   $('#aAi').innerHTML = `
-    <div class="small muted" style="margin-bottom:10px">Local engine: ${s.ollama.ok ? pill('ok', 'Ollama running') : pill('bad', 'Ollama down')} ${s.ollama.ok ? `<span class="faint">models: ${esc(s.ollama.models.join(', ') || 'none')}</span>` : ''}</div>
+    <div class="small muted" style="margin-bottom:10px">Managed Groq: ${a.groqConfigured ? pill('ok', 'Configured') : pill('bad', 'Add your Groq key')} · Local fallback: ${s.ollama.ok ? pill('ok', 'Ollama running') : pill('bad', 'Ollama down')} ${s.ollama.ok ? `<span class="faint">models: ${esc(s.ollama.models.join(', ') || 'none')}</span>` : ''}</div>
+    <div class="row" style="margin-bottom:10px"><button class="btn ghost sm" data-act="groqPreset">Select Groq GPT-OSS 20B + Whisper</button></div>
     <div class="field"><label class="lbl">API base URL</label><input data-admin="ai_base_url" value="${esc(a.ai_base_url)}" placeholder="Empty = local Ollama on this server"></div>
     <div class="grid2"><div class="field"><label class="lbl">Model</label><input data-admin="ai_model" value="${esc(a.ai_model)}" placeholder="${esc(a.local_default_model)}"></div>
     <div class="field"><label class="lbl">API key (if using an API)</label><input type="password" data-admin="ai_key" value="${esc(a.ai_key)}" autocomplete="new-password"></div></div>
+    <div class="grid2"><div class="field"><label class="lbl">AI calls per number per day</label><input type="number" min="1" max="100000" data-admin="ai_daily_limit" value="${esc(a.ai_daily_limit)}"></div>
+    <div class="field"><label class="lbl">Voice seconds per number per day</label><input type="number" min="1" max="100000" data-admin="voice_daily_seconds" value="${esc(a.voice_daily_seconds)}"></div></div>
+    <div class="hint">Daily budgets protect your usage. 50 GB disk storage is not equivalent to RAM for running a local model.</div>
     <button class="btn sm" data-act="saveAdmin" data-busy="Saving…">Save</button>
     <div class="divider"></div>
     <label class="lbl">Download a local open-source model</label>
