@@ -213,20 +213,23 @@ function renderRecoveryAuth(mode) {
 }
 
 // ---------- shell ----------
-const NAV = [
-  ['home', '🏠', 'Home'],
-  ['replies', '💬', 'Reply rules'],
-  ['brain', '🧠', 'Knowledge & prompts'],
-  ['actions', '⚡', 'Actions'],
-  ['email', '📧', 'Bot email'],
-  ['voice', '🎙️', 'Voice notes'],
-  ['model', '🤖', 'AI model'],
+const MAIN_NAV = [
+  ['home', '🏠', 'Overview'],
+  ['replies', '💬', 'Who gets replies'],
+  ['brain', '📚', 'Teach your AI'],
   ['chats', '🗂️', 'Conversations'],
-  ['playground', '🧪', 'Test your AI'],
-  ['-'],
+  ['playground', '✨', 'Try your AI'],
+];
+const MORE_NAV = [
+  ['voice', '🎙️', 'Voice notes'],
+  ['actions', '⚡', 'Automations'],
+  ['model', '🤖', 'AI model'],
+  ['email', '📧', 'Email'],
   ['account', '👤', 'Account'],
   ['admin', '🛡️', 'Admin', true],
 ];
+const navEntry = ([id, ico, label, adm]) => adm && !S.me.user.is_admin ? '' :
+  `<a href="#/${id}" class="${S.page === id ? 'active' : ''}"><span class="ico">${ico}</span>${label}</a>`;
 
 function renderShell() {
   clearInterval(S.poll);
@@ -243,7 +246,14 @@ function renderShell() {
         <select id="targetSel"><option value="mine" ${S.target === 'mine' ? 'selected' : ''}>My WhatsApp</option><option value="house" ${S.target === 'house' ? 'selected' : ''}>Shared Air number</option></select>` : '<div class="small faint">My WhatsApp</div>'}
         <div class="row between" style="margin-top:8px">${statusPill}<span class="small muted mono">${S.wa?.me?.phone ? '+' + esc(S.wa.me.phone) : ''}</span></div>
       </div>
-      <nav class="nav">${NAV.map(([id, ico, label, adm]) => id === '-' ? '<div class="sep"></div>' : (adm && !isAdmin ? '' : `<a href="#/${id}" class="${S.page === id ? 'active' : ''}"><span class="ico">${ico}</span>${label}</a>`)).join('')}</nav>
+      <nav class="nav" aria-label="Main navigation">
+        <div class="navCaption">YOUR ASSISTANT</div>
+        ${MAIN_NAV.map(navEntry).join('')}
+        <details class="navMore" ${MORE_NAV.some(([id]) => id === S.page) ? 'open' : ''}>
+          <summary>⚙️ More settings <span aria-hidden="true">⌄</span></summary>
+          <div class="navMoreItems">${MORE_NAV.map(navEntry).join('')}</div>
+        </details>
+      </nav>
       <div class="foot"><div class="faint small">${esc(S.me.user.email)} · v${esc(S.me.version)}</div><div class="row"><button class="btn ghost sm" data-act="theme">◐ Theme</button><button class="btn ghost sm" data-act="logout">Log out</button></div></div>
     </aside>
     <div class="mainwrap"><main class="main" id="main"></main></div>
@@ -369,38 +379,54 @@ const PAGES = {};
 // ---------- HOME ----------
 PAGES.home = {
   render() {
-    const st = S.wa?.status || 'idle';
-    const op = o();
-    const who = { me: 'Only you', allow: 'Only the people you chose', everyone: 'Everyone who messages you' }[op.reply_mode];
-    const grp = { off: 'Off', mention: 'Any group, when @mentioned', selected: `${(op.selected_groups || []).length} chosen group(s)` }[op.group_mode];
-    const house = S.target === 'house';
-    const banners = [];
-    if (!S.draft.enabled) banners.push(`<div class="banner warn"><div class="bi">⏸️</div><div><b>Your AI is turned off.</b> It won't answer anyone until you turn it back on.</div></div>`);
-    if (!house && op.reply_mode === 'everyone') banners.push(`<div class="banner warn"><div class="bi">⚠️</div><div><b>Your AI answers everyone who messages you</b> — including strangers and spam. Choose <a href="#/replies">Only the people you choose</a> if that's not what you want. Block numbers there too.</div></div>`);
-    return `
-      <div class="pagehead"><div><h1>${house ? 'Shared Air number' : `Hi ${esc(S.me.user.name || '')}`.trim()}</h1><p>${house ? 'Anyone who messages this number gets AI replies.' : 'Your AI assistant on WhatsApp.'}</p></div></div>
-      ${banners.join('')}
-      ${st !== 'open' ? `<section class="card" id="connectCard">${connectBody(st)}</section>` : ''}
-      <div class="${st === 'open' ? 'grid2' : ''}">
-        ${st === 'open' ? `<section class="card" id="connectCard">${connectBody(st)}</section>` : ''}
-        <section class="card">
-          <div class="head"><div><h2>Quick controls</h2><p>The most important switches.</p></div></div>
-          <div class="sw"><div><div class="t">AI is ${S.draft.enabled ? 'on' : 'off'}</div><div class="d">Master switch for this number.</div></div>
-            <label class="toggle"><input type="checkbox" data-field="enabled" id="masterSw" ${S.draft.enabled ? 'checked' : ''}><span></span></label></div>
-          <div class="sw"><div><div class="t">Who it answers</div><div class="d">${house ? 'Everyone (shared number)' : esc(who)}</div></div><a class="btn ghost sm" href="#/replies">Change</a></div>
-          <div class="sw"><div><div class="t">Groups</div><div class="d">${esc(grp)}</div></div><a class="btn ghost sm" href="#/replies">Change</a></div>
-          <div class="sw"><div><div class="t">Knowledge</div><div class="d" id="kbSum">Loading…</div></div><a class="btn ghost sm" href="#/brain">Manage</a></div>
-        </section>
-      </div>
-      <div class="stats" id="stats"></div>
-      ${card('Recent activity', 'What your AI did. Message contents stay private in Conversations.', '<div class="feed" id="feed"><div class="muted">Loading…</div></div>', '<a class="btn ghost sm" href="#/chats">Conversations</a>')}
-      ${!house ? card('How to use it', '', `
-        <div class="grid3">
-          <div><h3>💬 Talk to it</h3><p class="muted small">Open <b>"Message yourself"</b> in WhatsApp and chat or send voice notes.</p></div>
-          <div><h3>⚡ Ask it to do things</h3><p class="muted small">"Email dan@acme.com that the order shipped", "remind me at 4pm to call Mike".</p></div>
-          <div><h3>🪄 Use it anywhere</h3><p class="muted small">In any chat, start with <code>${esc(op.trigger_word || '/ai')}</code> — e.g. <code>${esc(op.trigger_word || '/ai')} translate to Hebrew</code>.</p></div>
-        </div>`) : ''}`;
-  },
+  const st = S.wa?.status || 'idle';
+  const op = o();
+  const house = S.target === 'house';
+  const connected = st === 'open';
+  const hasInfo = !!String(op.about || '').trim() || !!(op.faq || []).length;
+  const audience = { me: 'Just me (safe default)', allow: 'Only chosen people', everyone: 'Everyone who messages' }[op.reply_mode] || 'Just me';
+  const banners = [];
+  if (!S.draft.enabled) banners.push('<div class="banner warn"><div class="bi">⏸️</div><div><b>AI replies are turned off.</b> Turn them back on using the switch below.</div></div>');
+  if (!house && op.reply_mode === 'everyone') banners.push('<div class="banner warn"><div class="bi">⚠️</div><div><b>Your AI can answer anyone who messages you.</b> This can include unknown contacts. <a href="#/replies">Change who it answers</a>.</div></div>');
+  return `
+    <div class="pagehead homeHead">
+      <div><span class="eyebrow">AIR AGENT DASHBOARD</span><h1>${house ? 'Shared WhatsApp assistant' : `Hi${S.me.user.name ? `, ${esc(S.me.user.name.split(' ')[0])}` : ''} 👋`}</h1><p>Let's make WhatsApp easier. Start here — no technical knowledge needed.</p></div>
+      ${connected ? pill('ok','WhatsApp connected') : pill('warn','1 step to get started')}
+    </div>
+    ${banners.join('')}
+    <section class="homeIntro">
+      <div><span class="eyebrow">YOUR NEXT STEP</span>
+        <h2>${connected ? 'Your WhatsApp is connected.' : 'Connect your WhatsApp in a few taps.'}</h2>
+        <p>${connected ? 'Now decide who the AI should reply to, and teach it the basics about your business.' : 'Open WhatsApp → Linked devices → Link a device. Scan the QR code. That’s it.'}</p>
+        <div class="row"><a href="${connected ? '#/replies' : '#connectCard'}" class="btn lg">${connected ? 'Choose who gets AI replies →' : 'Connect WhatsApp ↓'}</a>
+        ${connected ? '<a class="btn ghost" href="#/playground">Try your AI</a>' : ''}</div>
+      </div><div class="homeIntroMark" aria-hidden="true">${connected ? '✓' : '💬'}</div>
+    </section>
+    <div class="setupHead"><h2>Get started in 3 simple steps</h2><span>Everything can be changed later</span></div>
+    <div class="setupGrid">
+      <a class="setupCard" href="${connected ? '#/home' : '#connectCard'}"><div class="setupIcon">${connected ? '✓' : '1'}</div>
+        <div class="setupBody"><b>Connect WhatsApp</b><p>${connected ? `Connected to +${esc(S.wa.me?.phone || '')}` : 'Scan the QR code from your phone'}</p><span class="setupLink">${connected ? 'Connected' : 'Connect now →'}</span></div></a>
+      <a class="setupCard" href="#/replies"><div class="setupIcon">2</div>
+        <div class="setupBody"><b>Choose who the AI answers</b><p>Currently: ${esc(audience)}</p><span class="setupLink">Change replies →</span></div></a>
+      <a class="setupCard" href="#/brain"><div class="setupIcon">${hasInfo ? '✓' : '3'}</div>
+        <div class="setupBody"><b>Teach it about your business</b><p>${hasInfo ? 'You have started teaching your assistant' : 'Add your opening hours, prices and FAQs'}</p><span class="setupLink">${hasInfo ? 'Manage information →' : 'Add business details →'}</span></div></a>
+    </div>
+    <div class="${connected ? 'grid2' : ''}">
+      <section class="card" id="connectCard">${connectBody(st)}</section>
+      <section class="card simpleControls">
+        <div class="head"><div><h2>Quick controls</h2><p>No complicated settings.</p></div></div>
+        <div class="sw"><div><div class="t">AI replies ${S.draft.enabled ? 'ON' : 'OFF'}</div><div class="d">Pause or resume this number’s AI.</div></div><label class="toggle"><input type="checkbox" data-field="enabled" id="masterSw" ${S.draft.enabled ? 'checked' : ''} aria-label="Turn AI on or off"><span></span></label></div>
+        <div class="sw"><div><div class="t">Who gets AI replies?</div><div class="d">${esc(audience)}</div></div><a class="btn ghost sm" href="#/replies">Change</a></div>
+        <div class="sw"><div><div class="t">Business knowledge</div><div class="d" id="kbSum">Checking…</div></div><a class="btn ghost sm" href="#/brain">Manage</a></div>
+        <div class="sw"><div><div class="t">Voice messages</div><div class="d">${op.voice_in ? 'AI can understand incoming voice notes' : 'Voice understanding is off'}</div></div><a class="btn ghost sm" href="#/voice">Change</a></div>
+      </section>
+    </div>
+    <div class="setupHead"><h2>What your assistant has been doing</h2><a href="#/chats">View conversations →</a></div>
+    <div class="stats" id="stats"></div>
+    ${card('Recent activity','Messages handled and important actions.','<div class="feed" id="feed"><div class="muted">Loading activity…</div></div>')}
+    <section class="helpStrip"><div><b>Want to test your AI before customers see it?</b><p>Try a message in the test area. It won’t send anything to a real contact.</p></div><a class="btn ghost" href="#/playground">Test a message →</a></section>
+  `;
+},
   async after() {
     pollStatus();
     api('/api/kb' + tq()).then((d) => { $('#kbSum') && ($('#kbSum').textContent = `${d.length} file(s)/note(s), ${(o().faq || []).length} FAQ`); }).catch(() => {});
