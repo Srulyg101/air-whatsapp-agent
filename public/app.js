@@ -79,7 +79,7 @@ const empty = (ico, text) => `<div class="empty"><div class="ei">${ico}</div>${t
 // ---------- boot ----------
 async function boot() {
   try { S.pub = await api('/api/public'); } catch (_) { S.pub = { botName: 'Air Agent', signupOpen: false }; }
-  try { S.me = await api('/api/me'); } catch (_) { return renderAuth(S.pub.firstUser ? 'signup' : 'login'); }
+  try { S.me = await api('/api/me'); } catch (_) { const mode = (location.hash.match(/^#\/(reset|forgot|signup|login)(?:\?|$)/) || [])[1]; return renderAuth(mode || (S.pub.firstUser ? 'signup' : 'login')); }
   try { const t = sessionStorage.getItem('target'); if (t === 'house' && S.me.user.is_admin) S.target = 'house'; } catch (_) {}
   await loadSettings();
   window.addEventListener('hashchange', route);
@@ -107,51 +107,108 @@ function route() {
 
 // ---------- landing / sign-in ----------
 function renderAuth(mode) {
+  if (mode === 'forgot' || mode === 'reset') return renderRecoveryAuth(mode);
   const signup = mode === 'signup';
   const first = S.pub.firstUser;
   $('#root').innerHTML = `
   <div class="landing">
-    <div class="top">${LOGO}<span>${esc(S.pub.botName)}</span></div>
+    <div class="top">${LOGO}<span>${esc(S.pub.botName)}</span><span class="topHint">Your WhatsApp. A lot less work.</span></div>
     <div class="hero">
       <div class="l">
-        <h1>Your WhatsApp, now with an <b>AI assistant</b>.<br>Scan any WhatsApp number — done.</h1>
-        <ol class="wsteps">
-          <li><span>${first ? 'Create the admin account for this server' : signup ? 'Create your free account' : 'Log in to your account'}</span></li>
-          <li><span>On your phone open WhatsApp → <b>Linked devices</b> → <b>Link a device</b></span></li>
-          <li>Scan the QR code. Your AI is live — it only answers who you choose.</li>
-        </ol>
-        <div class="sub">Works with personal and WhatsApp Business numbers. Text, voice notes, groups.</div>
+        <span class="eyebrow">YOUR WHATSAPP AI ASSISTANT</span>
+        <h1>More time for business.<br><b>Less time answering chats.</b></h1>
+        <p class="landingLead">Air Agent helps you reply to customers, understand voice notes, and stay on top of messages. No coding. No confusing setup.</p>
+        <div class="landingSteps">
+          <div><span class="stepNum">1</span><span><b>Create your account</b><small>Just your email and a password.</small></span></div>
+          <div><span class="stepNum">2</span><span><b>Connect WhatsApp</b><small>Scan a QR code from Linked devices.</small></span></div>
+          <div><span class="stepNum">3</span><span><b>Choose who gets replies</b><small>You're in control. Start with just yourself.</small></span></div>
+        </div>
+        <div class="trustLine">✓ Simple setup &nbsp; ✓ You stay in control &nbsp; ✓ Voice notes supported</div>
       </div>
       <div class="r">
-        <h2 style="font-size:20px;font-weight:400;margin-bottom:18px">${first ? 'Set up your server' : signup ? 'Create your account' : 'Log in'}</h2>
+        <div class="authHeader"><span class="authGlyph">✦</span><h2>${first ? 'Create the administrator account' : signup ? 'Create your Air Agent account' : 'Welcome back'}</h2><p>${first ? 'Set up your private Air Agent server.' : signup ? 'Start with your own WhatsApp AI.' : 'Sign in to manage your WhatsApp assistant.'}</p></div>
         <form id="authForm" class="stack">
-          ${signup ? '<div><label class="lbl" for="aName">Your name</label><input id="aName" autocomplete="name"></div>' : ''}
-          <div><label class="lbl" for="aEmail">Email</label><input id="aEmail" type="email" autocomplete="email" required></div>
-          <div><label class="lbl" for="aPass">Password</label><input id="aPass" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" required minlength="8"></div>
-          <div class="hint" id="aErr" style="color:var(--danger)"></div>
-          <button class="btn lg" type="submit" style="width:100%;justify-content:center">${signup ? 'Create account' : 'Log in'}</button>
+          ${signup ? '<div><label class="lbl" for="aName">Your name</label><input id="aName" autocomplete="name" placeholder="Your name" required></div>' : ''}
+          <div><label class="lbl" for="aEmail">Email address</label><input id="aEmail" type="email" autocomplete="email" placeholder="you@business.com" required></div>
+          <div><div class="authLabel"><label class="lbl" for="aPass">Password</label>${!signup ? '<a href="#/forgot" id="aForgot">Forgot password?</a>' : ''}</div>
+            <div class="passwordInput"><input id="aPass" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" placeholder="Enter your password" required minlength="8"><button type="button" id="aShowPass" aria-label="Show or hide password">Show</button></div></div>
+          <div class="hint" id="aErr" role="alert"></div>
+          <button class="btn lg authSubmit" id="aSubmit" type="submit">${signup ? 'Create account' : 'Sign in'} <span>→</span></button>
         </form>
-        ${S.pub.signupOpen && !first ? `<p class="small muted" style="margin-top:16px;text-align:center">${signup ? 'Already have an account?' : 'New here?'} <a href="#" id="aSwitch">${signup ? 'Log in' : 'Create an account'}</a></p>` : ''}
-        ${!S.pub.signupOpen && !signup ? '<p class="small faint" style="margin-top:16px;text-align:center">New accounts are created by the admin.</p>' : ''}
-        <div class="lock" style="margin-top:18px">🔒 Your chats stay on this server. The AI only answers who you allow.</div>
+        ${S.pub.signupOpen && !first ? `<p class="authBottom">${signup ? 'Already have an account?' : 'New to Air Agent?'} <a href="#/${signup ? 'login' : 'signup'}" id="aSwitch">${signup ? 'Sign in' : 'Create an account'}</a></p>` : ''}
+        ${!S.pub.signupOpen && !signup ? '<p class="authBottom muted">Need an account? Ask your Air Agent administrator.</p>' : ''}
+        <div class="authPrivacy">🔒 Your account is protected. Your AI only replies when you allow it.</div>
       </div>
     </div>
     <div class="feats">
-      <div class="feat"><div class="fi">💬</div><b>Replies like you</b><span>Answers only you, people you pick, or everyone. Steps back when you reply.</span></div>
-      <div class="feat"><div class="fi">🧠</div><b>Knows your business</b><span>Upload price lists, menus and FAQs — it answers from them.</span></div>
-      <div class="feat"><div class="fi">🎙️</div><b>Hears voice notes</b><span>Understands voice notes and can answer by voice.</span></div>
-      <div class="feat"><div class="fi">⚡</div><b>Gets things done</b><span>Emails, calls, reminders and messages — just ask in WhatsApp.</span></div>
+      <div class="feat"><div class="fi">💬</div><b>Customer replies</b><span>Answer common questions while you focus on work.</span></div>
+      <div class="feat"><div class="fi">🎙️</div><b>Voice notes</b><span>Understand audio messages automatically.</span></div>
+      <div class="feat"><div class="fi">📚</div><b>Knows your business</b><span>Teach it prices, hours and frequently asked questions.</span></div>
+      <div class="feat"><div class="fi">🛡️</div><b>You're in control</b><span>Pick exactly who can get an automated reply.</span></div>
     </div>
-    <div class="legal">${esc(S.pub.botName)} is an independent product. It is not affiliated with, endorsed by or sponsored by WhatsApp or Meta.</div>
+    <div class="legal">${esc(S.pub.botName)} is independent of WhatsApp and Meta. Linked-device connections may be restricted by WhatsApp.</div>
   </div>`;
-  $('#aSwitch')?.addEventListener('click', (e) => { e.preventDefault(); renderAuth(signup ? 'login' : 'signup'); });
+  $('#aSwitch')?.addEventListener('click', (e) => { e.preventDefault(); location.hash = signup ? '#/login' : '#/signup'; renderAuth(signup ? 'login' : 'signup'); });
+  $('#aForgot')?.addEventListener('click', (e) => { e.preventDefault(); location.hash = '#/forgot'; renderAuth('forgot'); });
+  $('#aShowPass')?.addEventListener('click', () => {
+    const input = $('#aPass'); input.type = input.type === 'password' ? 'text' : 'password';
+    $('#aShowPass').textContent = input.type === 'password' ? 'Show' : 'Hide';
+  });
   $('#authForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     $('#aErr').textContent = '';
+    const submit = $('#aSubmit'); submit.disabled = true; submit.textContent = 'One moment…';
     try {
       await api('/api/' + (signup ? 'signup' : 'login'), { body: { email: $('#aEmail').value, password: $('#aPass').value, name: $('#aName')?.value } });
-      location.hash = '#/home'; boot();
-    } catch (err) { $('#aErr').textContent = err.message; }
+      location.hash = '#/home'; await boot();
+    } catch (err) { $('#aErr').textContent = err.message; submit.disabled = false; submit.textContent = signup ? 'Create account →' : 'Sign in →'; }
+  });
+}
+
+function renderRecoveryAuth(mode) {
+  const reset = mode === 'reset';
+  const token = new URLSearchParams((location.hash.split('?')[1] || '')).get('token') || '';
+  const tokenValid = /^[a-f0-9]{64}$/i.test(token);
+  $('#root').innerHTML = `
+  <div class="landing recoveryLanding">
+    <div class="top">${LOGO}<span>${esc(S.pub.botName)}</span></div>
+    <div class="recoveryPanel">
+      <div class="recoveryIcon">${reset ? '🔐' : '✉️'}</div>
+      <h1>${reset ? 'Choose a new password' : 'Forgot your password?'}</h1>
+      <p class="muted">${reset ? 'Create a strong new password for your Air Agent account.' : 'Enter the email address you use to sign in. We’ll email you a private reset link.'}</p>
+      ${!reset && S.pub.passwordRecoveryReady === false ? '<div class="recoveryInfo">Email recovery isn’t set up on this server yet. Ask your Air Agent administrator to enable it in Admin → Password recovery.</div>' : ''}
+      ${reset && !tokenValid ? '<div class="recoveryInfo">This link is invalid. Please request a new password-reset email.</div>' : `
+      <form id="recoveryForm" class="stack">
+        ${reset ? `<div><label class="lbl" for="newPassword">New password (10–72 characters)</label><input type="password" id="newPassword" autocomplete="new-password" minlength="10" maxlength="72" required></div>
+         <div><label class="lbl" for="confirmPassword">Confirm new password</label><input type="password" id="confirmPassword" autocomplete="new-password" minlength="10" maxlength="72" required></div>` :
+          '<div><label class="lbl" for="recoveryEmail">Your account email</label><input id="recoveryEmail" type="email" autocomplete="email" placeholder="you@business.com" required></div>'}
+        <div id="recoveryNotice" role="status" class="hint"></div>
+        <button id="recoverySubmit" type="submit" class="btn lg authSubmit">${reset ? 'Change password' : 'Email me a reset link'} <span>→</span></button>
+      </form>`}
+      <a href="#/login" id="backToLogin" class="authBack">← Back to sign in</a>
+    </div>
+  </div>`;
+  $('#backToLogin').addEventListener('click', (e) => { e.preventDefault(); location.hash = '#/login'; renderAuth('login'); });
+  $('#recoveryForm')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const note = $('#recoveryNotice'); note.textContent = '';
+    const submit = $('#recoverySubmit'); submit.disabled = true; submit.textContent = 'Working…';
+    try {
+      if (reset) {
+        const password = $('#newPassword').value;
+        if (password !== $('#confirmPassword').value) throw new Error('Passwords do not match.');
+        const result = await api('/api/password/reset', { body: { token, password } });
+        $('#recoveryForm').innerHTML = `<div class="banner ok"><div class="bi">✓</div><div>${esc(result.message)}</div></div><a class="btn" href="#/login" id="resetDone">Sign in with new password →</a>`;
+        $('#resetDone').addEventListener('click', e => { e.preventDefault(); location.hash = '#/login'; renderAuth('login'); });
+      } else {
+        const result = await api('/api/password/forgot', { body: { email: $('#recoveryEmail').value } });
+        note.textContent = result.message;
+        note.className = 'recoverySuccess';
+        submit.textContent = 'Send another link';
+        submit.disabled = false;
+        return;
+      }
+    } catch (err) { note.textContent = err.message; note.className = 'recoveryError'; submit.disabled = false; submit.textContent = reset ? 'Change password' : 'Email me a reset link'; }
   });
 }
 
