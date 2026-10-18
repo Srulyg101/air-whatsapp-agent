@@ -238,7 +238,7 @@ app.post('/api/playground', auth, wrap(async (req, res) => {
 }));
 
 // ---------- voice ----------
-app.get('/api/voice/status', auth, (req, res) => res.json({ local: voice.whisperStatus(), model: config.whisperModel, serverApi: !!getApp('voice_api_base') }));
+app.get('/api/voice/status', auth, (req, res) => res.json({ local: voice.whisperStatus(), model: config.whisperModel, serverApi: voice.managedSpeechReady(), managed: voice.managedSpeechReady() }));
 app.post('/api/voice/test', auth, upload.single('file'), wrap(async (req, res) => {
   if (!req.file) throw bad('No audio file');
   const t0 = Date.now();
@@ -512,6 +512,8 @@ app.get('/api/admin/settings', auth, admin, (req, res) => res.json({
   signup_open: getApp('signup_open') === '1', allow_custom_ai: getApp('allow_custom_ai') === '1',
   ai_base_url: getApp('ai_base_url'), ai_model: getApp('ai_model') || config.model, ai_key: mask(getAppSecret('ai_key')),
   voice_api_base: getApp('voice_api_base'), voice_api_model: getApp('voice_api_model'), voice_api_key: mask(getAppSecret('voice_api_key')),
+  ai_daily_limit: getApp('ai_daily_limit'), voice_daily_seconds: getApp('voice_daily_seconds'),
+  groqConfigured: !!(process.env.GROQ_API_KEY || (getApp('ai_base_url') === 'https://api.groq.com/openai/v1' && getAppSecret('ai_key'))),
   local_default_model: config.model, ollama_url: config.ollamaUrl, pulls: ai.pulls,
   mail_domain: getApp('mail_domain'), bot_smtp_host: getApp('bot_smtp_host'), bot_smtp_port: getApp('bot_smtp_port'), bot_smtp_user: getApp('bot_smtp_user'),
   bot_smtp_pass: mask(getAppSecret('bot_smtp_pass')), inbound_secret: email.inboundSecret(),
@@ -525,6 +527,11 @@ app.post('/api/admin/settings', auth, admin, wrap((req, res) => {
     const v = String(b[k] || '').trim();
     if (v && !/^https?:\/\//.test(v)) throw bad(`${k} must start with http(s)://`);
     setApp(k, v.replace(/\/$/, ''));
+  }
+  for (const k of ['ai_daily_limit', 'voice_daily_seconds']) if (k in b) {
+    const n = Number(b[k]);
+    if (!Number.isSafeInteger(n) || n < 1 || n > 100000) throw bad(`${k} must be between 1 and 100,000`);
+    setApp(k, String(n));
   }
   for (const k of ['ai_model', 'voice_api_model', 'bot_smtp_host', 'bot_smtp_user']) if (k in b) setApp(k, String(b[k] || '').trim().slice(0, 200));
   if ('bot_smtp_port' in b) setApp('bot_smtp_port', String(Number(b.bot_smtp_port) || 587));
@@ -604,7 +611,7 @@ app.get('/{*splat}', (req, res) => res.sendFile(path.join(__dirname, '..', 'publ
 
 // ---------- housekeeping ----------
 if (config.retentionDays > 0) {
-  const prune = () => { q.prune.run(config.retentionDays * 86400); q.pruneEvents.run(Math.max(30, config.retentionDays) * 86400); };
+  const prune = () => { q.prune.run(config.retentionDays * 86400); q.pruneEvents.run(Math.max(30, config.retentionDays) * 86400); q.pruneDaily.run(); };
   prune();
   setInterval(prune, 6 * 3600_000).unref();
 }
