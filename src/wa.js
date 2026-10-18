@@ -36,6 +36,8 @@ class Session {
     this.lastError = null;
     this.groupCache = new Map(); // jid -> { name, at }
     this.recent = new Map();     // jid -> last messages (RAM only), used as chat context for the AI
+    this.seenMessages = new Map(); // guards against repeated WhatsApp upserts
+    this.pendingText = new Map(); // short window to combine rapid customer texts
   }
 
   /** Remember the last messages of each chat in memory (never written to disk). */
@@ -114,6 +116,8 @@ class Session {
         if (this.lastLogged !== this.me.phone) { logEvent(this.id, 'info', null, `WhatsApp connected (+${this.me.phone})`); this.lastLogged = this.me.phone; }
       }
       if (u.connection === 'close') {
+        for (const p of this.pendingText.values()) clearTimeout(p.timer);
+        this.pendingText.clear();
         const code = u.lastDisconnect?.error?.output?.statusCode;
         this.lastError = u.lastDisconnect?.error?.message || null;
         this.sock = null;
@@ -137,19 +141,53 @@ class Session {
       }
     });
 
+    const processOne = async (m, before, entry) => {
+      if (this.stopped || this.sock !== sock) return;
+      try {
+        await handleMessage(m, { sessionId: this.id, isHouse: this.isHouse, sock, sentIds: this.sentIds, me: this.me, groupName: (j) => this.groupName(j), recent: before, entry });
+        this.handled++;
+      } catch (err) { console.error(`[${this.id}] handle error:`, err.message); }
+    };
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       for (const m of messages) {
-        // Messages typed on the owner's own phone can arrive as 'append'; only handle fresh ones.
         const ts = Number(m.messageTimestamp || 0);
         if (type !== 'notify' && !(m.key?.fromMe && ts && Date.now() / 1000 - ts < 120)) continue;
-        const before = (this.recent.get(m.key?.remoteJid) || []).slice();
-        const entry = this.remember(m);
-        try {
-          await handleMessage(m, { sessionId: this.id, isHouse: this.isHouse, sock, sentIds: this.sentIds, me: this.me, groupName: (j) => this.groupName(j), recent: before, entry });
-          this.handled++;
-        } catch (err) {
-          console.error(`[${this.id}] handle error:`, err.message);
+        const jid = m.key?.remoteJid;
+        const id = m.key?.id;
+        if (jid && id) {
+          const key = jid + ':' + (m.key.participant || '') + ':' + id;
+          if (this.seenMessages.has(key)) continue;
+          this.seenMessages.set(key, Date.now());
+          if (this.seenMessages.size > 10000) {
+            const cutoff = Date.now() - 30 * 60_000;
+            for (const [k, when] of this.seenMessages) {
+              if (when > cutoff && this.seenMessages.size < 5000) break;
+              this.seenMessages.delete(k);
+            }
+          }
         }
+        const before = (this.recent.get(jid) || []).slice();
+        const entry = this.remember(m);
+        const content = extractContent(m);
+        const text = content.text?.trim() || '';
+        const batch = jid && !m.key?.fromMe && !jid.endsWith('@g.us') && !content.audio && !content.document &&
+          text && !/^\/(stop|start|help|reset)\b/i.test(text);
+        if (batch) {
+          const previous = this.pendingText.get(jid);
+          const pending = previous || { parts: [], before };
+          pending.parts.push({ m, entry, text });
+          clearTimeout(pending.timer);
+          pending.timer = setTimeout(() => {
+            if (this.pendingText.get(jid) !== pending) return;
+            this.pendingText.delete(jid);
+            const last = pending.parts[pending.parts.length - 1];
+            const merged = pending.parts.length === 1 ? last.m :
+              { ...last.m, message: { conversation: pending.parts.map(p => p.text).join('\n').slice(0, 4000) } };
+            processOne(merged, pending.before, last.entry);
+          }, 1200);
+          pending.timer.unref?.();
+          this.pendingText.set(jid, pending);
+        } else await processOne(m, before, entry);
       }
       if (this.sentIds.size > 5000) { let n = this.sentIds.size - 1000; for (const id of this.sentIds) { if (n-- <= 0) break; this.sentIds.delete(id); } }
     });
@@ -157,6 +195,8 @@ class Session {
 
   async stop() {
     this.stopped = true;
+    for (const p of this.pendingText.values()) clearTimeout(p.timer);
+    this.pendingText.clear();
     clearTimeout(this.reconnectTimer);
     try { this.sock?.end(undefined); } catch (_) {}
     this.sock = null;
@@ -165,6 +205,9 @@ class Session {
 
   async logout() {
     this.stopped = true;
+    for (const p of this.pendingText.values()) clearTimeout(p.timer);
+    this.pendingText.clear();
+    this.seenMessages.clear();
     clearTimeout(this.reconnectTimer);
     try { await this.sock?.logout(); } catch (_) {}
     this.sock = null;
