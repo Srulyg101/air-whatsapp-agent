@@ -29,6 +29,12 @@ test('forgot password issues a single-use link, revokes old logins and accepts n
   const signup = await post('/api/signup', { email, password:'oldPassword1234', name:'Alice' });
   assert.equal(signup.status, 200);
   const cookie = signup.cookie.split(';')[0];
+  // Only logged-in admins may trigger an SMTP test; no arbitrary recipients.
+  const noAuth = await post('/api/admin/password-recovery/test', {});
+  assert.equal(noAuth.status, 401);
+  const noSmtp = await post('/api/admin/password-recovery/test', {}, { Cookie: cookie });
+  assert.equal(noSmtp.status, 400);
+  assert.match(noSmtp.body.error, /SMTP host/i);
   const unknown = await post('/api/password/forgot', { email:'unknown@example.com' });
   const requested = await post('/api/password/forgot', { email });
   assert.equal(unknown.status, 200);
