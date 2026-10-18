@@ -47,6 +47,10 @@ CREATE TABLE IF NOT EXISTS muted_chats (
 
 -- v2 --------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS daily_ai_usage (
+  session_id TEXT NOT NULL, day TEXT NOT NULL, calls INTEGER DEFAULT 0,
+  voice_seconds INTEGER DEFAULT 0, PRIMARY KEY(session_id, day)
+);
 CREATE TABLE IF NOT EXISTS session_secrets (
   session_id TEXT NOT NULL, name TEXT NOT NULL, value TEXT NOT NULL,
   PRIMARY KEY (session_id, name)
@@ -170,7 +174,7 @@ const DEFAULT_OPTIONS = {
   ai_model: '',
   // ---- voice
   voice_in: true,            // understand voice notes
-  voice_engine: 'server',    // server | api
+  voice_engine: 'smart',     // smart | server | api
   voice_reply: false,        // answer voice notes with a voice note (needs a speech API)
   tts_voice: 'alloy',
   tts_model: 'tts-1',
@@ -213,6 +217,14 @@ const q = {
   deleteToken: db.prepare('DELETE FROM auth_tokens WHERE token = ?'),
   deleteUserTokens: db.prepare('DELETE FROM auth_tokens WHERE user_id = ?'),
   listUsers: db.prepare('SELECT id, email, name, is_admin, created_at FROM users ORDER BY id DESC'),
+  // Persistent per-number daily limits (UTC); count failed calls against limit.
+  claimAi: db.prepare(`INSERT INTO daily_ai_usage (session_id, day, calls) VALUES (?, date('now'), 1)
+    ON CONFLICT(session_id, day) DO UPDATE SET calls = calls + 1 WHERE calls < ?`),
+  claimVoice: db.prepare(`INSERT INTO daily_ai_usage (session_id, day, voice_seconds) VALUES (?, date('now'), ?)
+    ON CONFLICT(session_id, day) DO UPDATE SET voice_seconds = voice_seconds + excluded.voice_seconds
+    WHERE voice_seconds + excluded.voice_seconds <= ?`),
+  usageToday: db.prepare("SELECT calls, voice_seconds FROM daily_ai_usage WHERE session_id = ? AND day = date('now')"),
+  pruneDaily: db.prepare("DELETE FROM daily_ai_usage WHERE day < date('now', '-45 days')"),
   // app settings
   getApp: db.prepare('SELECT value FROM app_settings WHERE key = ?'),
   setApp: db.prepare('INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
@@ -284,6 +296,8 @@ const APP_DEFAULTS = {
   ai_model: '',         // empty = MODEL env
   voice_api_base: '',
   voice_api_model: 'whisper-1',
+  ai_daily_limit: '300',
+  voice_daily_seconds: '3600',
   mail_domain: '',      // e.g. bots.airbiz.ai  -> each bot can claim name@bots.airbiz.ai
   bot_smtp_host: '', bot_smtp_port: '587', bot_smtp_user: '',
 };
@@ -305,7 +319,7 @@ function getSettings(sessionId) {
 const ENUMS = {
   reply_mode: ['me', 'allow', 'everyone'], group_mode: ['off', 'mention', 'selected'], selected_groups_reply: ['mention', 'all'],
   reply_length: ['short', 'medium', 'long'], tone: ['friendly', 'professional', 'casual', 'funny', 'custom'],
-  ai_mode: ['server', 'custom'], voice_engine: ['server', 'api'], call_provider: ['twilio'],
+  ai_mode: ['server', 'custom'], voice_engine: ['smart', 'server', 'api'], call_provider: ['twilio'],
   act_email: ['off', 'me', 'anyone'], act_call: ['off', 'me', 'anyone'], act_whatsapp: ['off', 'me'],
   act_reminder: ['off', 'me', 'anyone'], act_webhook: ['off', 'me', 'anyone'], act_note: ['off', 'me', 'anyone'], act_notify: ['off', 'anyone'], act_email_read: ['off', 'me'],
 };
