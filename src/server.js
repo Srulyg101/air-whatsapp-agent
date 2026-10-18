@@ -597,6 +597,16 @@ app.post('/api/admin/settings', auth, admin, wrap((req, res) => {
   for (const k of ['ai_key', 'voice_api_key', 'bot_smtp_pass']) if (k in b && !String(b[k]).startsWith('••••')) setAppSecret(k, String(b[k] || '').trim());
   res.json({ ok: true });
 }));
+// Test the real SMTP submission path without exposing credentials to the browser.
+app.post('/api/admin/password-recovery/test', auth, admin, slowDown, wrap(async (req, res) => {
+  if (!recovery.isConfigured()) throw bad('Set your SMTP host, username and password in Admin first.', 400);
+  await recovery.sendTestEmail({ to: req.user.email });
+  res.json({
+    ok: true, recipient: req.user.email,
+    message: 'SMTP accepted the test email. Check your inbox and spam folder; acceptance does not guarantee delivery.',
+  });
+}));
+
 app.post('/api/admin/pull', auth, admin, (req, res) => {
   const name = String(req.body?.model || '').trim();
   if (!/^[\w.\-/:]+$/.test(name)) return res.status(400).json({ error: 'Invalid model name' });
