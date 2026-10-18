@@ -15,7 +15,7 @@ function loadRecovery(env, configured = true) {
   };
   const requireMock = name => {
     if (name === 'crypto') return crypto;
-    if (name === 'nodemailer') return { createTransport: params => ({ sendMail: async message => deliveries.push({ params, message }) }) };
+    if (name === 'nodemailer') return { createTransport: params => ({ verify: async () => true, sendMail: async message => deliveries.push({ params, message }) }) };
     if (name === './db') return {
       getApp: k => settings[k] || '',
       getAppSecret: k => k === 'bot_smtp_pass' ? 'dummy-secret' : '',
@@ -73,4 +73,20 @@ test('custom sender and trusted HTTPS origin are supported', () => {
   settings.reset_email_from = 'hello@example.com';
   assert.match(recovery.senderSettings().from, /hello@example.com/);
   assert.match(recovery.recoveryLink('b'.repeat(64)), /^https:\/\/agent\.llama2\.com\/#\/reset\?token=/);
+});
+
+test('SMTP test sends to admin only with required TLS submission', async () => {
+  const { recovery, deliveries } = loadRecovery({});
+  const result = await recovery.sendTestEmail({ to: 'admin@example.com' });
+  assert.equal(result.submitted, true);
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0].message.to, 'admin@example.com');
+  assert.equal(deliveries[0].params.requireTLS, true);
+  assert.equal(deliveries[0].params.tls.minVersion, 'TLSv1.2');
+  assert.equal(deliveries[0].params.port, 587);
+  assert.match(deliveries[0].message.subject, /test/i);
+});
+test('SMTP test fails closed when no sending account exists', async () => {
+  const { recovery } = loadRecovery({}, false);
+  await assert.rejects(() => recovery.sendTestEmail({ to: 'admin@example.com' }), /not configured/);
 });
