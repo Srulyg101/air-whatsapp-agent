@@ -28,19 +28,42 @@ function recoveryLink(token) {
     throw new Error('PUBLIC_URL must be an HTTPS site origin');
   return `${url.origin}/#/reset?token=${encodeURIComponent(token)}`;
 }
+function createSmtpTransport(cfg) {
+  // SMTP submission is authenticated and must negotiate TLS (587) or use TLS-on-connect (465).
+  return nodemailer.createTransport({
+    host: cfg.host, port: cfg.port, secure: cfg.port === 465,
+    requireTLS: cfg.port !== 465,
+    tls: { minVersion: 'TLSv1.2' },
+    auth: { user: cfg.user, pass: cfg.pass },
+    connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 20000,
+  });
+}
+
 async function sendRecoveryEmail({ to, token }) {
   const cfg = senderSettings();
   if (!cfg) throw new Error('Password reset email is not configured');
   await assertPublicHost(cfg.host);
-  const transport = nodemailer.createTransport({
-    host: cfg.host, port: cfg.port, secure: cfg.port === 465,
-    auth: { user: cfg.user, pass: cfg.pass },
-    connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 20000,
-  });
+  const transport = createSmtpTransport(cfg);
   const link = recoveryLink(token);
   await transport.sendMail({
     from: cfg.from, to, subject: 'Reset your Air Agent password',
     text: `Someone requested a password reset for your Air Agent account.\n\nTo choose a new password, use this link within 20 minutes:\n${link}\n\nIf this was not you, you can ignore this email. Never share this link.`,
   });
 }
-module.exports = { RESET_TTL_SECONDS, RESET_COOLDOWN_SECONDS, hashToken, newToken, senderSettings, isConfigured, recoveryLink, sendRecoveryEmail };
+/** Admin-only delivery test: SMTP accepted the message, not proof of inbox delivery. */
+async function sendTestEmail({ to }) {
+  const cfg = senderSettings();
+  if (!cfg) throw new Error('SMTP is not configured. Enter server, username and password in Admin.');
+  if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(to || '')) throw new Error('Invalid admin email');
+  await assertPublicHost(cfg.host);
+  const transport = createSmtpTransport(cfg);
+  await transport.verify();
+  await transport.sendMail({
+    from: cfg.from,
+    to,
+    subject: 'Air Agent password recovery — test email',
+    text: 'Air Agent submitted this test email using your configured SMTP server.\n\nIf this reached your inbox, password recovery email is ready for a live test.\nIf it went to spam, check the sending domain SPF, DKIM and DMARC records.',
+  });
+  return { submitted: true };
+}
+module.exports = { RESET_TTL_SECONDS, RESET_COOLDOWN_SECONDS, hashToken, newToken, senderSettings, isConfigured, recoveryLink, sendRecoveryEmail, sendTestEmail };
