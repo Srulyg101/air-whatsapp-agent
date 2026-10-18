@@ -200,6 +200,11 @@ async function listModels(p) {
 }
 
 async function health() {
+  const provider = resolveProvider(null);
+  if (!isLocal(provider.base)) {
+    // External AI should not make /health fail just because local Ollama is unused.
+    return { ok: true, models: [provider.model], modelReady: !!provider.model, provider: provider.label };
+  }
   try {
     const res = await fetch(`${config.ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(5000) });
     const data = await res.json();
