@@ -14,6 +14,8 @@ const recovery = require('../src/password-recovery');
 let lastEmail;
 recovery.isConfigured = () => true;
 recovery.sendRecoveryEmail = async ({ to, token }) => { lastEmail = { to, token }; };
+let lastSmtpTest;
+recovery.sendTestEmail = async ({ to }) => { lastSmtpTest = to; return { submitted: true }; };
 const app = require('../src/server');
 
 test('forgot password issues a single-use link, revokes old logins and accepts new password', async t => {
@@ -32,9 +34,11 @@ test('forgot password issues a single-use link, revokes old logins and accepts n
   // Only logged-in admins may trigger an SMTP test; no arbitrary recipients.
   const noAuth = await post('/api/admin/password-recovery/test', {});
   assert.equal(noAuth.status, 401);
-  const noSmtp = await post('/api/admin/password-recovery/test', {}, { Cookie: cookie });
-  assert.equal(noSmtp.status, 400);
-  assert.match(noSmtp.body.error, /SMTP host/i);
+  const adminTest = await post('/api/admin/password-recovery/test', {}, { Cookie: cookie });
+  assert.equal(adminTest.status, 200);
+  assert.equal(adminTest.body.ok, true);
+  assert.equal(adminTest.body.recipient, email);
+  assert.equal(lastSmtpTest, email);
   const unknown = await post('/api/password/forgot', { email:'unknown@example.com' });
   const requested = await post('/api/password/forgot', { email });
   assert.equal(unknown.status, 200);
