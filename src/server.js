@@ -585,7 +585,7 @@ app.post('/api/admin/disconnect-all', auth, admin, wrap(async (req, res) => {
 // Public health endpoint for uptime monitors (Uptime Kuma etc.) — no private data
 app.get('/health', async (req, res) => {
   const o = await ai.health();
-  res.status(o.ok ? 200 : 503).json({ ok: o.ok, uptimeSec: Math.round((Date.now() - started) / 1000) });
+  res.status(o.ok ? 200 : 503).json({ ok: o.ok, version: config.version, uptimeSec: Math.round((Date.now() - started) / 1000) });
 });
 
 app.get('/metrics', auth, admin, async (req, res) => {
