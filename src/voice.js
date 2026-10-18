@@ -63,7 +63,7 @@ async function transcribeLocal(buffer) {
 // ---------- API (Groq, OpenAI, self-hosted faster-whisper, ...) ----------
 async function audioProvider(settings) {
   const o = settings.options;
-  if (o.ai_mode === 'custom' && o.ai_base_url && getApp('allow_custom_ai') === '1') {
+  if (o.voice_engine === 'api' && o.ai_mode === 'custom' && o.ai_base_url && getApp('allow_custom_ai') === '1') {
     await assertPublicUrl(o.ai_base_url);
     return { base: o.ai_base_url.replace(/\/$/, ''), key: getSecret(settings.session_id, 'voice_api_key') || getSecret(settings.session_id, 'ai_key') };
   }
