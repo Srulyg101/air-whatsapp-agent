@@ -40,7 +40,10 @@ app.use(express.static(path.join(__dirname, '..', 'public'), { index: false }));
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: config.maxUploadMb * 1024 * 1024, files: 1 } });
 const started = Date.now();
 const sessionIdFor = (user) => `u${user.id}`;
-const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => res.status(e.status || 500).json({ error: e.message }));
+const wrap = (fn) => (req, res, next) => Promise.resolve().then(() => fn(req, res)).catch((e) => {
+  if (res.headersSent) return next(e);
+  res.status(e.status || 500).json({ error: e.message || 'Server error' });
+});
 const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
 
 // ---------- auth ----------
