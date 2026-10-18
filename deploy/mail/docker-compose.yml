@@ -1,0 +1,26 @@
+name: air-agent-mail
+
+# Optional stand-alone, open-source Stalwart mail server.
+# Deploy independently of the existing Air Agent Compose stack.
+# Do not expose Stalwart's bootstrap admin listener to the internet.
+# Existing Caddy is already serving 80/443; this stack does not bind those ports.
+services:
+  stalwart:
+    image: stalwartlabs/stalwart:v0.16
+    restart: unless-stopped
+    ports:
+      - "25:25"                 # SMTP mail transport. Hostinger outbound limit: 5/min.
+      - "587:587"               # Authenticated SMTP submission, STARTTLS
+      - "465:465"               # Authenticated SMTP submission, implicit TLS
+      - "127.0.0.1:18080:8080" # Bootstrap/admin: only via SSH tunnel
+    volumes:
+      - stalwart-config:/etc/stalwart
+      - stalwart-data:/var/lib/stalwart
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    # No published IMAP/POP3 ports: only outbound transactional mail is needed.
+    # Add inbound/mailbox ports later if you explicitly need them.
+volumes:
+  stalwart-config:
+  stalwart-data:

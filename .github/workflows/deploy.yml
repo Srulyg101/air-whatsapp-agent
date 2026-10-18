@@ -30,6 +30,8 @@ jobs:
         run: find src public scripts tests -name '*.js' -print0 | xargs -0 -n1 node --check
       - name: Install dependencies for full integration tests
         run: npm ci --no-audit --no-fund
+      - name: Validate optional mail Docker Compose
+        run: docker compose -f deploy/mail/docker-compose.yml config --quiet
       - name: Run regression and integration tests
         run: node --test tests/*.test.js
   ssh-deploy:
