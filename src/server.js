@@ -10,6 +10,7 @@ const db = require('./db');
 const { q, getSettings, saveSettings, maskedSecrets, getApp, setApp, setAppSecret, getAppSecret, logEvent } = db;
 const ai = require('./ai');
 const kb = require('./knowledge');
+const website = require('./website-import');
 const voice = require('./voice');
 const actions = require('./actions');
 const { think } = require('./agent');
@@ -232,6 +233,11 @@ app.post('/api/kb/text', auth, wrap((req, res) => {
   const { title, text } = req.body || {};
   if (!String(text || '').trim()) throw bad('Text is empty');
   res.json(kb.addDocument(sid(req), String(title || 'Note').slice(0, 200), String(text).slice(0, 200000), { kind: 'text', size: String(text).length }));
+}));
+app.post('/api/kb/website', auth, slowDown, wrap(async (req, res) => {
+  const url = String(req.body?.url || '').trim();
+  if (!url || url.length > 1400) throw bad('Enter a business website URL.');
+  res.json(await website.importWebsite(sid(req), url));
 }));
 app.get('/api/kb/:id', auth, (req, res) => {
   const d = q.doc.get(Number(req.params.id), sid(req));
@@ -563,6 +569,8 @@ app.get('/api/admin/settings', auth, admin, (req, res) => res.json({
   voice_api_base: getApp('voice_api_base'), voice_api_model: getApp('voice_api_model'), voice_api_key: mask(getAppSecret('voice_api_key')),
   ai_daily_limit: getApp('ai_daily_limit'), voice_daily_seconds: getApp('voice_daily_seconds'),
   groqConfigured: !!(process.env.GROQ_API_KEY || (getApp('ai_base_url') === 'https://api.groq.com/openai/v1' && getAppSecret('ai_key'))),
+  firecrawlConfigured: !!(process.env.FIRECRAWL_API_KEY || getAppSecret('firecrawl_key')),
+  firecrawl_key: mask(getAppSecret('firecrawl_key')),
   local_default_model: config.model, ollama_url: config.ollamaUrl, pulls: ai.pulls,
   mail_domain: getApp('mail_domain'), bot_smtp_host: getApp('bot_smtp_host'), bot_smtp_port: getApp('bot_smtp_port'), bot_smtp_user: getApp('bot_smtp_user'),
   bot_smtp_pass: mask(getAppSecret('bot_smtp_pass')), reset_email_from: getApp('reset_email_from'), passwordRecoveryReady: recovery.isConfigured(), inbound_secret: email.inboundSecret(),
@@ -594,7 +602,7 @@ app.post('/api/admin/settings', auth, admin, wrap((req, res) => {
     if (d && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d)) throw bad('Mail domain looks wrong (e.g. bots.yourdomain.com)');
     setApp('mail_domain', d);
   }
-  for (const k of ['ai_key', 'voice_api_key', 'bot_smtp_pass']) if (k in b && !String(b[k]).startsWith('••••')) setAppSecret(k, String(b[k] || '').trim());
+  for (const k of ['ai_key', 'voice_api_key', 'bot_smtp_pass', 'firecrawl_key']) if (k in b && !String(b[k]).startsWith('••••')) setAppSecret(k, String(b[k] || '').trim());
   res.json({ ok: true });
 }));
 // Test the real SMTP submission path without exposing credentials to the browser.
