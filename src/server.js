@@ -377,6 +377,8 @@ app.post('/api/inbound/email', wrap(async (req, res) => {
     const p = await simpleParser(String(b.raw).slice(0, 6_000_000));
     b.from = b.from || p.from?.text; b.subject = b.subject ?? p.subject; b.text = b.text || p.text || ''; b.html = b.html || (p.html || '');
     b.message_id = b.message_id || p.messageId; b.to = b.to || p.to?.text;
+    b.automated = !!p.headers?.get('auto-submitted') && p.headers.get('auto-submitted') !== 'no';
+    b.listMail = !!p.headers?.get('list-id') || !!p.headers?.get('list-unsubscribe') || !!p.headers?.get('precedence');
   }
   const domain = (getApp('mail_domain') || '').toLowerCase();
   const tos = (Array.isArray(b.to) ? b.to : String(b.to || '').split(',')).map((x) => String(x).match(/[^<\s]+@[^>\s]+/)?.[0]?.toLowerCase()).filter(Boolean);
@@ -393,6 +395,7 @@ app.post('/api/inbound/email', wrap(async (req, res) => {
       source: 'inbound', uid: b.message_id || crypto.createHash('sha1').update(JSON.stringify([b.from, b.subject, b.text, b.date])).digest('hex'),
       from_addr: fromAddr, from_name: fromName, to_addr: to, subject: b.subject, message_id: b.message_id,
       text: b.text || (b.html ? String(b.html).replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/gi, ' ').replace(/<[^>]+>/g, ' ') : ''),
+      automated: !!b.automated, listMail: !!b.listMail,
     }, wa);
     if (id) delivered++;
   }
