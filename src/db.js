@@ -176,6 +176,7 @@ const DEFAULT_OPTIONS = {
   faq: [],                   // [{q, a}]
   keyword_rules: [],         // [{keyword, match: contains|exact, reply}]
   use_knowledge: true,
+  booking_url: '',         // verified customer-provided scheduling page; never claim booked from a link
   // ---- AI model
   ai_mode: 'server',         // server | custom
   ai_base_url: '',
@@ -196,6 +197,7 @@ const DEFAULT_OPTIONS = {
   act_webhook: 'off',
   act_note: 'anyone',
   act_notify: 'anyone',
+  act_booking: 'anyone',   // share booking page or save a request for a person
   confirm_actions: true,     // ask "yes/no" before email, calls and WhatsApp sends
   smtp_host: '', smtp_port: 587, smtp_user: '', smtp_from: '', smtp_secure: false,
   call_provider: 'twilio',   // twilio (more later)
@@ -205,6 +207,7 @@ const DEFAULT_OPTIONS = {
   act_email_read: 'me',      // read & reply to the bot's emails (off | me)
   mail_check: true,          // check the connected mailbox
   mail_notify: true,         // WhatsApp me when a new email arrives
+  mail_auto_reply: false,    // optional; OFF until customer explicitly enables it
   imap_host: '', imap_port: 993, imap_user: '', imap_secure: true,
 };
 
@@ -352,6 +355,7 @@ function cleanOptions(input = {}) {
   }
   if (out.ai_base_url && !/^https?:\/\//i.test(out.ai_base_url)) out.ai_base_url = '';
   if (out.webhook_url && !/^https?:\/\//i.test(out.webhook_url)) out.webhook_url = '';
+  if (out.booking_url && !/^https:\/\/[^\s@/]+\.[^\s@/]+/i.test(out.booking_url)) out.booking_url = '';
   return out;
 }
 
