@@ -705,7 +705,7 @@ PAGES.actions = {
     <div class="pagehead"><div><h1>Actions</h1><p>Let your AI do real things — just ask it in WhatsApp.</p></div></div>
     <div class="banner ok"><div class="bi">💡</div><div>Try in <b>Message yourself</b>: <i>"email dan@acme.com that the order shipped"</i> · <i>"remind me tomorrow at 9 to call Mike"</i> · <i>"call +1 718 555 1234 and tell them we're open till 6"</i> · <i>"send Mom a WhatsApp that I'm running late"</i></div></div>
     <div data-live>
-    ${card('Safety', '', sw('confirm_actions', 'Ask me "yes / no" before sending emails, calls or WhatsApp messages', 'The AI shows exactly what it will send and waits for your OK. Strongly recommended.'))}
+    ${card('Safety', '', '<p class="small muted">Air Agent always shows a preview and waits for your confirmation before it sends email, makes calls, sends WhatsApp messages, schedules a reminder, submits a booking request, or triggers a webhook.</p>')}
 
     ${card('🎯 Command numbers', 'Messages from these numbers are treated as <b>you</b>: they can ask the AI to email, call, set reminders, send WhatsApps — anything you can. Use it for your second phone, your office line or a trusted assistant.', chips('owner_numbers', 'Command numbers', 'Only add numbers you fully trust. Risky actions still ask "yes / no" first.'))}
 
@@ -944,7 +944,7 @@ PAGES.model = {
         <details style="margin-top:12px"><summary>Use another model</summary>${txt('ai_model', 'Model id', 'provider/model-name', 'Any model listed on openrouter.ai/models')}</details>`)
       : card('', '', `
         <div class="signin"><div class="big">✨</div><div class="grow"><h2 style="font-size:18px">Make your assistant much smarter — one click</h2>
-          <p class="muted" style="margin:4px 0 0">Sign in with Google or email and choose ChatGPT, Claude, Llama and more. No API keys to copy. Pay only for what you use on your OpenRouter account.</p></div>
+          <p class="muted" style="margin:4px 0 0">Sign in to OpenRouter and choose an available GPT, Claude, Llama, or other model. OpenRouter handles billing for your usage.</p></div>
           <button class="btn lg" data-act="orSignin" data-busy="Opening…">Sign in & connect</button></div>
         <p class="small faint" style="margin:12px 0 0">OpenRouter uses its own billing. Official Sign in with ChatGPT plan usage is now available for approved integrations, but commercial websites need OpenAI approval; OpenRouter sign-in is not that integration.</p>`)}
     ${location.protocol === 'http:' && /^\d{1,3}(\.\d{1,3}){3}$/.test(location.hostname) ? `<div class="banner warn"><div class="bi">🔒</div><div>Sign-in needs a secure (HTTPS) address. Open <a href="https://${location.hostname.replace(/\./g, '-')}.sslip.io/#/model"><b>https://${location.hostname.replace(/\./g, '-')}.sslip.io</b></a> (free HTTPS for this server), log in, and sign in from there.</div></div>` : ''}
@@ -1126,7 +1126,7 @@ PAGES.admin = {
     </div>
     ${card('Users', '', `<div id="aUsers" class="muted">Loading…</div>
       <details style="margin-top:14px"><summary>+ Create a user</summary>
-        <div class="grid3"><div class="field"><label class="lbl">Name</label><input id="nuName"></div><div class="field"><label class="lbl">Email</label><input id="nuEmail" type="email"></div><div class="field"><label class="lbl">Temporary password</label><input id="nuPass" type="text" minlength="8"></div></div>
+        <div class="grid3"><div class="field"><label class="lbl">Name</label><input id="nuName"></div><div class="field"><label class="lbl">Email</label><input id="nuEmail" type="email"></div><div class="field"><label class="lbl">Temporary password</label><input id="nuPass" type="password" minlength="10" maxlength="72" autocomplete="new-password"></div></div>
         <button class="btn sm" data-act="newUser" data-busy="Creating…">Create user</button></details>`)}
     ${card('Bot email domain', 'Lets every user claim an address like name@yourdomain for their assistant.', '<div id="aMail" class="muted">Loading…</div>')}
     ${card('Password recovery', 'Let customers securely reset forgotten passwords by email.', '<div id="aRecovery" class="muted">Loading…</div>')}
@@ -1149,6 +1149,14 @@ PAGES.admin = {
       if (existing && password) password.value = '';
       toast('Stalwart details filled in. Start your Stalwart mail server, create this mailbox and app password, then paste that password and save.');
       $('#aRecovery')?.scrollIntoView({ behavior:'smooth', block:'center' });
+    },
+    hostingerPreset: () => {
+      const host = $('[data-admin="bot_smtp_host"]');
+      if (host?.value?.trim() && host.value.trim() !== 'smtp.hostinger.com' &&
+          !confirm('This changes the existing mail server. Continue?')) return;
+      if (host) host.value = 'smtp.hostinger.com';
+      $('[data-admin="bot_smtp_port"]').value = '465';
+      toast('Hostinger SMTP filled in. Enter your full Hostinger mailbox address and mailbox password, then save and test.');
     },
     smtpTest: b => busy(b, async () => {
       const result = await api('/api/admin/password-recovery/test', { body:{} });
@@ -1178,7 +1186,7 @@ PAGES.admin = {
     pull: (b) => busy(b, async () => { const name = $('#pullName').value.trim(); if (!name) throw new Error('Enter a model name'); await api('/api/admin/pull', { body: { model: name } }); toast('Downloading ' + name + '…'); setTimeout(loadAdmin, 2000); }),
     newUser: (b) => busy(b, async () => { await api('/api/admin/users', { body: { name: $('#nuName').value, email: $('#nuEmail').value, password: $('#nuPass').value } }); toast('User created — share the email & password with them'); $('#nuName').value = $('#nuEmail').value = $('#nuPass').value = ''; loadAdmin(); }),
     uAdmin: (b) => busy(b, async () => { await api(`/api/admin/users/${b.dataset.id}`, { body: { is_admin: b.dataset.v === '1' } }); loadAdmin(); }),
-    uPw: async (b) => { const p = prompt('New password for this user (min 8 characters):'); if (p) await busy(b, async () => { await api(`/api/admin/users/${b.dataset.id}`, { body: { password: p } }); toast('Password reset'); }); },
+    uPw: async (b) => { const p = prompt('New password for this user (10 or more characters):'); if (p) await busy(b, async () => { await api(`/api/admin/users/${b.dataset.id}`, { body: { password: p } }); toast('Password reset'); }); },
     uDisc: (b) => busy(b, async () => { await api(`/api/admin/users/${b.dataset.id}`, { body: { disconnect: true } }); toast('Unlinked'); loadAdmin(); }),
     uDel: (b) => { if (confirm(`Delete ${b.dataset.email} and all their data?`)) busy(b, async () => { await api(`/api/admin/users/${b.dataset.id}`, { method: 'DELETE' }); loadAdmin(); }); },
   },
@@ -1222,28 +1230,28 @@ async function loadAdmin() {
   $('#aRecovery').innerHTML = `
     <div class="banner ${a.passwordRecoveryReady ? 'ok' : 'warn'}" style="margin-bottom:14px">
       <div class="bi">${a.passwordRecoveryReady ? '✓' : '✉️'}</div>
-      <div><b>${a.passwordRecoveryReady ? 'Reset email is configured' : 'Reset email needs setup'}</b>
-        <div class="small">${a.passwordRecoveryReady ? 'Users can request 20-minute password reset links from the login page. Send a test email to verify delivery.' : 'Enter the SMTP host, username and password in Bot email domain above, save, and verify that mail can be delivered.'}</div>
+      <div><b>${a.passwordRecoveryReady ? 'Reset email is ready' : a.passwordRecoveryStatus?.enabled ? 'Reset email needs setup' : 'Email recovery is disabled'}</b>
+        <div class="small">${a.passwordRecoveryReady ? 'Users can request single-use reset links that expire after 20 minutes.' : a.passwordRecoveryStatus?.missing?.length ? `Check: ${esc(a.passwordRecoveryStatus.missing.join(', '))}.` : 'Enable recovery after you have saved and tested SMTP settings.'}</div>
       </div>
     </div>
+    <div class="sw"><div><div class="t">Enable email password recovery</div><div class="d">Users see one generic response whether or not the email has an account.</div></div>${chk('password_recovery_enabled', a.password_recovery_enabled)}</div>
+    <div class="row" style="margin:12px 0"><button class="btn ghost sm" data-act="hostingerPreset">Use Hostinger Email</button><button class="btn ghost sm" data-act="stalwartPreset">Use open-source Stalwart</button>
+      <a class="btn ghost sm" href="https://github.com/Srulyg101/air-whatsapp-agent/blob/main/deploy/mail/README.md" target="_blank" rel="noopener noreferrer">Stalwart setup ↗</a></div>
+    <div class="grid2"><div class="field"><label class="lbl">SMTP host</label><input data-admin="bot_smtp_host" value="${esc(a.bot_smtp_host)}" placeholder="smtp.hostinger.com"></div><div class="field"><label class="lbl">SMTP port</label><input type="number" min="1" max="65535" data-admin="bot_smtp_port" value="${esc(a.bot_smtp_port)}" placeholder="465"></div></div>
+    <div class="hint">Hostinger Email: <b>smtp.hostinger.com</b>; use port <b>465 with SSL</b> or <b>587 with STARTTLS</b>. Username is your full mailbox address; password is that mailbox’s password. Sender must be allowed by your mail provider.</div>
+    <div class="grid2" style="margin-top:10px"><div class="field"><label class="lbl">SMTP username</label><input data-admin="bot_smtp_user" value="${esc(a.bot_smtp_user)}" placeholder="you@yourdomain.com" autocomplete="username"></div><div class="field"><label class="lbl">Mailbox password</label><input type="password" data-admin="bot_smtp_pass" value="${esc(a.bot_smtp_pass)}" autocomplete="new-password"></div></div>
     <div class="field"><label class="lbl">Password-reset sender email (optional)</label>
       <input type="email" data-admin="reset_email_from" placeholder="support@yourdomain.com" value="${esc(a.reset_email_from || '')}">
       <div class="hint">Leave blank to use the SMTP username. This email should be authorized to send through your SMTP provider.</div></div>
-    <div class="field" style="margin-top:16px">
-      <div style="font-weight:700;margin-bottom:5px">Free open-source option: Stalwart</div>
-      <p class="small muted">Host your own mail server on your VPS. No per-message vendor bill. Requires one-time domain DNS, a secure mail server and an SMTP app password.</p>
-      <div class="row"><button class="btn ghost sm" data-act="stalwartPreset">Use open-source Stalwart</button>
-      <a class="btn ghost sm" href="https://github.com/Srulyg101/air-whatsapp-agent/blob/main/deploy/mail/README.md" target="_blank" rel="noopener noreferrer">Setup instructions ↗</a></div>
-    </div>
     <div class="divider"></div>
     <div class="row"><button class="btn sm" data-act="saveAdmin" data-busy="Saving…">Save recovery settings</button>
       <button class="btn ghost sm" data-act="smtpTest" data-busy="Sending test…">Send test email to me</button></div>
     <p id="smtpTestResult" class="small muted" role="status" style="margin-top:10px"></p>
-    <p class="small muted">The SMTP test checks login/TLS and mail submission. You must check your inbox (and spam) before relying on password resets. Recovery links use agent.llama2.com by default, or the trusted PUBLIC_URL.</p>
+    <p class="small muted">SMTP credentials are encrypted on this server and shared with bot-address sending. The test checks login/TLS and mail submission; check your inbox and spam folder. Set PUBLIC_URL to your HTTPS site origin if it differs from agent.llama2.com.</p>
   `;
   $('#aMail').innerHTML = `
     <div class="grid2"><div class="field"><label class="lbl">Mail domain</label><input data-admin="mail_domain" value="${esc(a.mail_domain)}" placeholder="bots.airbiz.ai"><div class="hint">A domain or subdomain you control, used only for bot addresses.</div></div>
-    <div class="field"><label class="lbl">Incoming mail webhook</label><input readonly value="${esc(a.inbound_url)}"><div class="hint">Header <code>X-Inbound-Secret: ${esc(a.inbound_secret)}</code></div></div></div>
+    <div class="field"><label class="lbl">Incoming mail webhook</label><input readonly value="${esc(a.inbound_url)}"><div class="hint">Webhook secret: ${a.inbound_secret_configured ? 'configured and stored encrypted' : 'not set'}. It is not shown in the browser.</div></div></div>
     <details><summary>How to receive mail (free with Cloudflare)</summary>
       <ol class="small" style="margin:0;padding-left:18px">
         <li><span>Add the domain to Cloudflare → <b>Email → Email Routing</b> → enable it (it adds the MX records).</span></li>
@@ -1251,10 +1259,8 @@ async function loadAdmin() {
         <li><span>Routing rules → <b>Catch-all</b> → Send to Worker.</span></li>
       </ol></details>
     <div class="divider"></div>
-    <label class="lbl">Outgoing email (password resets and optional bot addresses)</label>
-    <p class="small muted">Use the open-source Stalwart option above or an SMTP provider you trust. These credentials are stored encrypted on your server.</p>
-    <div class="grid2"><div class="field"><label class="lbl small">SMTP server</label><input data-admin="bot_smtp_host" value="${esc(a.bot_smtp_host)}" placeholder="smtp.resend.com"></div><div class="field"><label class="lbl small">Port</label><input data-admin="bot_smtp_port" value="${esc(a.bot_smtp_port)}" placeholder="587"></div></div>
-    <div class="grid2"><div class="field"><label class="lbl small">Username</label><input data-admin="bot_smtp_user" value="${esc(a.bot_smtp_user)}"></div><div class="field"><label class="lbl small">Password / API key</label><input type="password" data-admin="bot_smtp_pass" value="${esc(a.bot_smtp_pass)}" autocomplete="new-password"></div></div>
+    <label class="lbl">Outgoing email</label>
+    <p class="small muted">SMTP settings are shared with password recovery. Manage the host and mailbox password in the Password recovery section above.</p>
     <button class="btn sm" data-act="saveAdmin" data-busy="Saving…">Save</button>`;
   $('#aUsers').innerHTML = `<div class="tablewrap"><table><tr><th>User</th><th>WhatsApp</th><th>Joined</th><th></th></tr>${s.userList.map((u) => `
     <tr><td><b>${esc(u.name || '—')}</b> ${u.is_admin ? '<span class="tag">admin</span>' : ''}<div class="small faint">${esc(u.email)}</div></td>

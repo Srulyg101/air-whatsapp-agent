@@ -16,7 +16,7 @@ services:
         set -e
         if [ -d /srv/app/.git ]; then git -C /srv/app pull --ff-only || true;
         else git clone --depth 1 ${REPO_URL:-https://github.com/Srulyg101/air-whatsapp-agent.git} /srv/app; fi
-        cd /srv/app && npm install --omit=dev --no-audit --no-fund && exec node src/server.js
+        cd /srv/app && npm ci --omit=dev --no-audit --no-fund && exec node src/server.js
     environment:
       - BOT_NAME=${BOT_NAME:-Air Agent}
       - MODEL=${MODEL:-qwen2.5:1.5b}
@@ -25,6 +25,7 @@ services:
       - RATE_LIMIT_PER_MIN=${RATE_LIMIT_PER_MIN:-12}
       - RETENTION_DAYS=${RETENTION_DAYS:-30}
       - COOKIE_SECURE=${COOKIE_SECURE:-auto}
+      - PUBLIC_URL=${PUBLIC_URL:-}
       - WHISPER_MODEL=${WHISPER_MODEL:-onnx-community/whisper-base}
       - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-15}
       - OLLAMA_URL=http://ollama:11434

@@ -31,10 +31,10 @@ and gets things done. Open-source AI by default, runs on your own server.
 
 - New numbers only answer their owner until the owner changes Reply rules.
 - Public sign-ups are **off**; the first account becomes admin and creates the others.
-- API keys and passwords are encrypted at rest (AES-256-GCM).
+- Provider and mailbox credentials are encrypted by the application (AES-256-GCM); SQLite chat, email and knowledge text are not encrypted at rest.
 - Cross-site requests are blocked, strict Content-Security-Policy, login rate limiting.
 - Uptime Kuma is bound to `127.0.0.1` (open it through an SSH tunnel).
-- Only messages the AI actually answered are stored (for its memory), and they are deleted after `RETENTION_DAYS`.
+- Chat replies are stored only when chat memory is enabled. Email bodies are stored in the SQLite data volume and pruned after `RETENTION_DAYS` (30 days by default). Notes and knowledge text remain until deleted or the account's data is removed.
 
 ## Install on a VPS
 
@@ -48,7 +48,7 @@ git clone https://github.com/Srulyg101/air-whatsapp-agent.git air-agent && cd ai
 sudo bash install.sh
 ```
 
-Then open `http://YOUR_SERVER_IP:8080` and create the first account (it becomes admin). OpenRouter sign-in requires a public HTTPS domain (except localhost); configure HTTPS before using that button.
+Use the HTTPS site through the existing Caddy reverse proxy before entering a real account password or connecting a WhatsApp number. The app port `8080` is also published by the default Compose configuration for initial setup; plain HTTP on that port is not safe for credentials. OpenRouter sign-in requires HTTPS (except localhost).
 
 ## Updating
 
@@ -122,8 +122,10 @@ Air Agent's homepage guides nontechnical owners through 1) scanning WhatsApp, 2)
 - On the login screen select **Forgot password?**. Enter the account email, then use the reset link from your inbox. A link works once and expires after **20 minutes**.
 - Reset tokens are cryptographically random, stored only as SHA-256 hashes, and deleted when used. Passwords are hashed with bcrypt, and all previously logged-in sessions are invalidated on reset.
 - Reset requests provide the same message for real or unknown email addresses, include per-IP rate limiting and five-minute per-account cooldown, and do not reveal the token via API responses or logs.
-- The application uses the server's existing **Admin → Bot email domain → SMTP server, username and password** settings for reset email, even when you do not assign individual bot email addresses. Configure these as administrator and use a provider that supports SMTP.
-- Under **Admin → Password recovery**, optionally set the sending email address. It must be a verified/authorized sender for your SMTP provider. Users see a configuration warning until the SMTP host, username and password are saved.
+- The application uses the SMTP settings in **Admin → Password recovery** for password reset email; they are also used for bot-address sending.
+- For Hostinger Email enter host `smtp.hostinger.com`, port `465` (implicit SSL) or `587` (STARTTLS), the complete mailbox address as SMTP username, that mailbox's password, and an authorized sender address. The app never supplies or stores Hostinger credentials unless the administrator enters them.
+- Set `PUBLIC_URL` in the app's server environment to the public HTTPS origin when it differs from the configured default; do not include a path, credentials, query, or fragment. The Compose deployment forwards this setting to the app.
+- Recovery requires the administrator to enable it, save settings and use **Send test email to me**. The status shows missing/invalid field names without returning stored credentials.
 - Password reset links point to `https://agent.llama2.com` by default, **not** an untrusted Host header. On other domains set `PUBLIC_URL=https://your-verified-domain.example` in the server environment. HTTPS is required.
 - Reset emails cannot be guaranteed to arrive until an administrator configures working SMTP, DNS sender authentication (SPF/DKIM, as needed), and tests delivery.
 

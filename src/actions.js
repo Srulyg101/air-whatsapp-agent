@@ -1,6 +1,6 @@
 // Actions the AI can take: email, phone calls, WhatsApp messages, reminders, notes, webhooks.
 // Each action has a permission per number: off | me (owner only) | anyone.
-// Risky actions (email, call, WhatsApp to someone else) ask "yes/no" first.
+// All external or delayed side effects ask "yes/no" first; the UI setting cannot bypass this.
 const crypto = require('crypto');
 const { q, getSecret, logEvent } = require('./db');
 const { assertPublicUrl } = require('./netguard');
@@ -70,9 +70,10 @@ ${a.body}`; },
     preview: (a) => `💬 *WhatsApp message*\nTo: +${normPhone(a.to) || a.to}\n\n${a.message}`,
   },
   set_reminder: {
-    perm: 'act_reminder', confirm: false,
+    perm: 'act_reminder', confirm: true,
     ready: () => true,
     schema: { description: 'Schedule a reminder message in this chat at a future time.', parameters: { type: 'object', properties: { when: { type: 'string', description: 'Local date and time, format YYYY-MM-DD HH:MM' }, minutes_from_now: { type: 'number', description: 'Alternative to "when": minutes from now' }, text: { type: 'string', description: 'What to remind about' } }, required: ['text'] } },
+    preview: a => `Set a reminder: ${String(a.text || '').slice(0, 1000)}\nTime: ${a.when || `${a.minutes_from_now || '?'} minutes from now`}`,
   },
   save_note: {
     perm: 'act_note', confirm: false,
@@ -80,9 +81,10 @@ ${a.body}`; },
     schema: { description: 'Save a note or lead for the owner (e.g. a customer name, phone, order or request).', parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } },
   },
   notify_owner: {
-    perm: 'act_notify', confirm: false,
+    perm: 'act_notify', confirm: true,
     ready: () => true,
     schema: { description: 'Alert the human owner when someone needs a real person, wants to buy, or something is urgent.', parameters: { type: 'object', properties: { message: { type: 'string', description: 'Short summary for the owner' } }, required: ['message'] } },
+    preview: a => `Send a WhatsApp alert to the owner:\n${String(a.message || '').slice(0, 2000)}`,
   },
   share_booking_link: {
     perm: 'act_booking', confirm: false,
@@ -90,14 +92,16 @@ ${a.body}`; },
     schema: { description: 'Give a customer the business booking link. This is not a confirmed reservation.', parameters: { type: 'object', properties: {} } },
   },
   request_booking: {
-    perm: 'act_booking', confirm: false,
+    perm: 'act_booking', confirm: true,
     ready: () => true,
     schema: { description: 'Save a customer appointment or event ticket booking request for the business owner. Never claim that a ticket or time is booked unless an actual booking integration confirms it.', parameters: { type: 'object', properties: { name: { type: 'string', description: 'Customer name' }, request: { type: 'string', description: 'Requested service/event, date/time, and other details' }, contact: { type: 'string', description: 'Customer phone/email if provided' } }, required: ['request'] } },
+    preview: a => `Save this booking request for the owner (not a reservation):\n${String(a.request || '').slice(0, 1500)}`,
   },
   trigger_webhook: {
-    perm: 'act_webhook', confirm: false,
+    perm: 'act_webhook', confirm: true,
     ready: (o) => !!o.webhook_url,
     schema: { description: 'Send an event to the owner\'s automation (Zapier/Make/n8n/CRM), e.g. new order or booking request.', parameters: { type: 'object', properties: { event: { type: 'string', description: 'Short event name, e.g. new_order' }, details: { type: 'string', description: 'All relevant details' } }, required: ['event', 'details'] } },
+    preview: a => `Send event “${String(a.event || '').slice(0, 100)}” to the configured automation:\n${String(a.details || '').slice(0, 2000)}`,
   },
 };
 
@@ -118,6 +122,7 @@ function toolsFor(ctx) {
 
 // ---------- confirmations ----------
 const pending = new Map(); // `${session}:${jid}` -> { name, args, expires }
+const MAX_PENDING_CONFIRMATIONS = 1000;
 const YES = /^(y|yes|yeah|yep|ok|okay|confirm|send|do it|go|go ahead|sure|כן|יא|jo|ja)[.! ]*$/i;
 const NO = /^(n|no|nope|cancel|stop|don'?t|לא|nein|nisht)[.! ]*$/i;
 
@@ -148,8 +153,11 @@ async function execute(name, args, ctx) {
   const bad = validate(name, args);
   if (bad) return bad;
   if (ctx.dryRun) return `(test mode) Would run ${name}: ${JSON.stringify(args)}`;
-  if (d.confirm && o.confirm_actions) {
-    pending.set(`${ctx.sessionId}:${ctx.jid}:${ctx.isOwner ? 'owner' : ctx.sender || ''}`, { name, args, isOwner: !!ctx.isOwner, expires: Date.now() + 10 * 60_000 });
+  if (d.confirm) {
+    const now = Date.now();
+    for (const [key, value] of pending) if (value.expires <= now) pending.delete(key);
+    if (pending.size >= MAX_PENDING_CONFIRMATIONS) pending.delete(pending.keys().next().value);
+    pending.set(`${ctx.sessionId}:${ctx.jid}:${ctx.isOwner ? 'owner' : ctx.sender || ''}`, { name, args, isOwner: !!ctx.isOwner, expires: now + 10 * 60_000 });
     return { confirm: `${d.preview(args, ctx)}\n\nReply *yes* to go ahead or *no* to cancel.` };
   }
   return run(name, args, ctx, false);
@@ -190,7 +198,7 @@ async function run(name, a, ctx, viaConfirm) {
         method: 'POST',
         headers: { Authorization: 'Basic ' + Buffer.from(`${o.twilio_sid}:${getSecret(ctx.sessionId, 'twilio_token')}`).toString('base64'), 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ To: to, From: o.twilio_from, Twiml: `<Response><Pause length="1"/><Say>${say}</Say><Pause length="1"/><Say>${say}</Say></Response>` }),
-        signal: AbortSignal.timeout(20_000),
+        redirect: 'manual', signal: AbortSignal.timeout(20_000),
       });
       if (!res.ok) throw new Error(`Twilio ${res.status}: ${(await res.text()).slice(0, 200)}`);
       result = `Calling ${to} now.`;
@@ -227,20 +235,20 @@ async function run(name, a, ctx, viaConfirm) {
       }
       result = 'Booking request saved for the owner. This is not a confirmed reservation or issued ticket.';
     } else if (name === 'trigger_webhook') {
-      await assertPublicUrl(o.webhook_url);
+      await assertPublicUrl(o.webhook_url, { requireHttps: true });
       const payload = JSON.stringify({ event: String(a.event).slice(0, 100), details: String(a.details).slice(0, 8000), contact: ctx.contact || null, chat: ctx.jid, at: new Date().toISOString() });
       const secret = getSecret(ctx.sessionId, 'webhook_secret');
       const headers = { 'Content-Type': 'application/json' };
       if (secret) headers['X-Air-Signature'] = crypto.createHmac('sha256', secret).update(payload).digest('hex');
-      const res = await fetch(o.webhook_url, { method: 'POST', headers, body: payload, signal: AbortSignal.timeout(15_000) });
+      const res = await fetch(o.webhook_url, { method: 'POST', redirect: 'manual', headers, body: payload, signal: AbortSignal.timeout(15_000) });
       if (!res.ok) throw new Error(`Webhook HTTP ${res.status}`);
       result = 'Done.';
     }
-    logEvent(ctx.sessionId, 'action', ctx.jid, `${name}: ${result}`);
+    logEvent(ctx.sessionId, 'action', ctx.jid, `${name} completed`);
     return viaConfirm ? `✅ ${result}` : result;
   } catch (e) {
-    logEvent(ctx.sessionId, 'error', ctx.jid, `${name} failed: ${e.message}`);
-    return viaConfirm ? `⚠️ Failed: ${e.message}` : `Error: ${e.message}`;
+    logEvent(ctx.sessionId, 'error', ctx.jid, `${name} failed`);
+    return viaConfirm ? '⚠️ Could not complete the action. Check its connection settings and try again.' : 'Action failed. Check its connection settings and try again.';
   }
 }
 
@@ -257,8 +265,8 @@ function startScheduler(wa) {
         const sent = await s.sock.sendMessage(r.chat_jid, { text: `⏰ *Reminder:* ${r.text}` });
         if (sent?.key?.id) s.sentIds.add(sent.key.id);
         q.setReminder.run('sent', r.id);
-        logEvent(r.session_id, 'action', r.chat_jid, `Reminder sent: ${r.text.slice(0, 80)}`);
-      } catch (e) { logEvent(r.session_id, 'error', r.chat_jid, `Reminder failed: ${e.message}`); }
+        logEvent(r.session_id, 'action', r.chat_jid, 'Reminder delivered');
+      } catch (_) { logEvent(r.session_id, 'error', r.chat_jid, 'Reminder delivery failed'); }
     }
   };
   setInterval(() => tick().catch(() => {}), 20_000).unref();

@@ -64,13 +64,14 @@ async function transcribeLocal(buffer) {
 async function audioProvider(settings) {
   const o = settings.options;
   if (o.voice_engine === 'api' && o.ai_mode === 'custom' && o.ai_base_url && getApp('allow_custom_ai') === '1') {
-    await assertPublicUrl(o.ai_base_url);
+    await assertPublicUrl(o.ai_base_url, { requireHttps: true });
     return { base: o.ai_base_url.replace(/\/$/, ''), key: getSecret(settings.session_id, 'voice_api_key') || getSecret(settings.session_id, 'ai_key') };
   }
   const configured = (getApp('voice_api_base') || '').replace(/\/$/, '');
   const groqFromAi = (getApp('ai_base_url') || '').replace(/\/$/, '') === GROQ_BASE && !!getAppSecret('ai_key');
   const base = configured || (groqFromAi || process.env.GROQ_API_KEY ? GROQ_BASE : '');
   if (!base) throw new Error('No speech API configured. Set up Groq in Admin or use local Whisper.');
+  if (base !== GROQ_BASE) await assertPublicUrl(base, { requireHttps: true });
   const key = getAppSecret('voice_api_key') || (base === GROQ_BASE ? getAppSecret('ai_key') || process.env.GROQ_API_KEY || '' : '');
   if (!key && base === GROQ_BASE) throw new Error('Groq speech API key is missing');
   return { base, key };
@@ -82,7 +83,7 @@ async function transcribeApi(buffer, mimetype, settings) {
   const form = new FormData();
   form.append('file', new Blob([buffer], { type: mimetype || 'audio/ogg' }), 'voice.ogg');
   form.append('model', model);
-  const res = await fetch(`${p.base}/audio/transcriptions`, { method: 'POST', headers: p.key ? { Authorization: `Bearer ${p.key}` } : {}, body: form, signal: AbortSignal.timeout(120_000) });
+  const res = await fetch(`${p.base}/audio/transcriptions`, { method: 'POST', redirect: 'manual', headers: p.key ? { Authorization: `Bearer ${p.key}` } : {}, body: form, signal: AbortSignal.timeout(120_000) });
   if (!res.ok) throw new Error(`Speech API ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data = await res.json();
   return String(data.text || '').trim();
@@ -104,7 +105,7 @@ async function transcribe(buffer, mimetype, settings) {
 async function speak(text, settings) {
   const p = await audioProvider(settings);
   const res = await fetch(`${p.base}/audio/speech`, {
-    method: 'POST',
+    method: 'POST', redirect: 'manual',
     headers: { 'Content-Type': 'application/json', ...(p.key ? { Authorization: `Bearer ${p.key}` } : {}) },
     body: JSON.stringify({ model: settings.options.tts_model || 'tts-1', voice: settings.options.tts_voice || 'alloy', input: String(text).slice(0, 3000), response_format: 'mp3' }),
     signal: AbortSignal.timeout(120_000),

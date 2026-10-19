@@ -6,13 +6,17 @@ const baileys = require('@whiskeysockets/baileys');
 const config = require('./config');
 const { handleMessage, extractContent } = require('./agent');
 const { logEvent } = require('./db');
+const { useEncryptedMultiFileAuthState } = require('./wa-auth-state');
 
 const makeWASocket = baileys.default;
-const { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } = baileys;
+const { DisconnectReason, fetchLatestBaileysVersion, Browsers } = baileys;
 
-const logger = pino({ level: process.env.WA_LOG_LEVEL || 'warn' });
+// Baileys diagnostics may contain untrusted protocol data. Application-level
+// status and safe event codes are logged separately; raw library logs stay off.
+const logger = pino({ level: 'silent' });
 const authRoot = path.join(config.dataDir, 'auth');
-fs.mkdirSync(authRoot, { recursive: true });
+fs.mkdirSync(authRoot, { recursive: true, mode: 0o700 });
+try { fs.chmodSync(authRoot, 0o700); } catch (_) {}
 
 let waVersion = null;
 async function getVersion() {
@@ -89,7 +93,7 @@ class Session {
   async _start() {
     this.stopped = false;
     this.status = 'connecting';
-    const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
+    const { state, saveCreds } = await useEncryptedMultiFileAuthState(this.authDir);
     const sock = makeWASocket({
       auth: state,
       version: await getVersion(),
@@ -112,17 +116,19 @@ class Session {
         this.qr = null;
         this.retries = 0;
         this.me = { id: sock.user?.id, name: sock.user?.name, phone: (sock.user?.id || '').split(':')[0].split('@')[0] };
-        console.log(`[${this.id}] connected as ${this.me.phone}`);
-        if (this.lastLogged !== this.me.phone) { logEvent(this.id, 'info', null, `WhatsApp connected (+${this.me.phone})`); this.lastLogged = this.me.phone; }
+        console.log(`[${this.id}] WhatsApp session connected`);
+        if (this.lastLogged !== this.me.phone) { logEvent(this.id, 'info', null, 'WhatsApp session connected'); this.lastLogged = this.me.phone; }
       }
       if (u.connection === 'close') {
         for (const p of this.pendingText.values()) clearTimeout(p.timer);
         this.pendingText.clear();
         const code = u.lastDisconnect?.error?.output?.statusCode;
-        this.lastError = u.lastDisconnect?.error?.message || null;
+        // The upstream error can include connection metadata. Expose only a
+        // stable code to the dashboard; never surface raw transport details.
+        this.lastError = code ? `WhatsApp connection closed (code ${code})` : 'WhatsApp connection closed';
         this.sock = null;
         if (code === DisconnectReason.loggedOut) {
-          console.log(`[${this.id}] logged out from phone`);
+          console.log(`[${this.id}] WhatsApp session logged out`);
           logEvent(this.id, 'info', null, 'WhatsApp unlinked from the phone');
           this.lastLogged = null;
           this.me = null;
@@ -137,7 +143,7 @@ class Session {
         this.retries++;
         this.status = 'connecting';
         const delay = Math.min(30_000, 1000 * 2 ** Math.min(this.retries, 5));
-        this.reconnectTimer = setTimeout(() => { if (!this.stopped) this.start().catch((e) => console.error(e)); }, code === DisconnectReason.restartRequired ? 0 : delay);
+        this.reconnectTimer = setTimeout(() => { if (!this.stopped) this.start().catch(() => console.error(`[${this.id}] WhatsApp reconnect failed`)); }, code === DisconnectReason.restartRequired ? 0 : delay);
       }
     });
 
@@ -146,7 +152,7 @@ class Session {
       try {
         await handleMessage(m, { sessionId: this.id, isHouse: this.isHouse, sock, sentIds: this.sentIds, me: this.me, groupName: (j) => this.groupName(j), recent: before, entry });
         this.handled++;
-      } catch (err) { console.error(`[${this.id}] handle error:`, err.message); }
+      } catch (_) { console.error(`[${this.id}] WhatsApp message processing failed`); }
     };
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       for (const m of messages) {
@@ -238,7 +244,7 @@ class SessionManager {
       const s = this.get(id);
       if (s.hasCreds()) {
         console.log(`[${id}] restoring session`);
-        s.start().catch((e) => console.error(`[${id}] restore failed`, e.message));
+        s.start().catch(() => console.error(`[${id}] WhatsApp session restore failed`));
       }
     }
   }

@@ -18,24 +18,31 @@ concurrency:
   group: deploy-vps
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
       - name: Check JavaScript syntax
         run: find src public scripts tests -name '*.js' -print0 | xargs -0 -n1 node --check
       - name: Install dependencies for full integration tests
         run: npm ci --no-audit --no-fund
+      - name: Audit production dependencies (fail on high or critical)
+        run: npm audit --omit=dev --audit-level=high
+      - name: Validate application Docker Compose
+        run: docker compose config --quiet
       - name: Validate optional mail Docker Compose
         run: docker compose -f deploy/mail/docker-compose.yml config --quiet
       - name: Run regression and integration tests
         run: node --test tests/*.test.js
   ssh-deploy:
-    if: github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: validate
     runs-on: ubuntu-latest
     env:
@@ -47,7 +54,7 @@ jobs:
 
       - name: Redeploy app and Caddy on VPS
         if: env.HAS_SSH == 'true'
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER_WA || 'root' }}
@@ -84,24 +91,22 @@ jobs:
             done
             if [ "$ACTUAL" != "${{ github.sha }}" ]; then
               echo "App did not pull the requested commit; leaving Caddy unchanged."
-              $DOCKER logs --tail 50 "$ID"
               exit 1
             fi
             $DOCKER compose --project-directory "$WORKDIR" -f "$COMPOSE_FILE" up -d --force-recreate caddy
-            $DOCKER logs --tail 30 "$ID"
 
   hostinger-deploy:
-    if: github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: validate
     runs-on: ubuntu-latest
     env:
       HAS_KEY: ${{ secrets.HOSTINGER_API_KEY != '' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Deploy to Hostinger VPS
         if: env.HAS_KEY == 'true'
-        uses: hostinger/deploy-on-vps@v2
+        uses: hostinger/deploy-on-vps@b0868cec74bfa63af6bfa7bdb0dfee2f9bef13ea # v2
         with:
           api-key: ${{ secrets.HOSTINGER_API_KEY }}
           virtual-machine: ${{ vars.HOSTINGER_VM_ID }}

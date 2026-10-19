@@ -1,6 +1,7 @@
 // Password recovery email: configured only by the server administrator.
 // Never use a request Host or Origin to construct a password reset URL.
 const crypto = require('crypto');
+const net = require('net');
 const nodemailer = require('nodemailer');
 const { getApp, getAppSecret } = require('./db');
 const { assertPublicHost } = require('./netguard');
@@ -15,12 +16,36 @@ function senderSettings() {
   const user = getApp('bot_smtp_user') || '';
   const pass = getAppSecret('bot_smtp_pass') || '';
   if (!host || !user || !pass) return null;
-  const port = Number(getApp('bot_smtp_port')) || 587;
+  const port = Number(getApp('bot_smtp_port'));
   const fromEmail = getApp('reset_email_from') || user;
-  if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(fromEmail)) return null;
+  if (!validSmtpHost(host) || !Number.isInteger(port) || port < 1 || port > 65535 || !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(fromEmail)) return null;
   return { host, user, pass, port, from: `Air Agent <${fromEmail}>` };
 }
-function isConfigured() { return !!senderSettings(); }
+function validSmtpHost(host) {
+  const value = String(host || '').trim().replace(/^\[|\]$/g, '');
+  if (net.isIP(value)) return true;
+  return value.length <= 253 && /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(value);
+}
+function setupStatus() {
+  const missing = [];
+  const smtpMissing = [];
+  const host = getApp('bot_smtp_host') || '';
+  const user = getApp('bot_smtp_user') || '';
+  const password = getAppSecret('bot_smtp_pass') || '';
+  const port = Number(getApp('bot_smtp_port'));
+  const from = getApp('reset_email_from') || user;
+  if (!host) smtpMissing.push('SMTP host');
+  else if (!validSmtpHost(host)) smtpMissing.push('valid SMTP hostname');
+  if (!user) smtpMissing.push('SMTP username');
+  if (!password) smtpMissing.push('SMTP password');
+  if (!Number.isInteger(port) || port < 1 || port > 65535) smtpMissing.push('valid SMTP port');
+  if (user && !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(from)) smtpMissing.push('valid sender email');
+  missing.push(...smtpMissing);
+  try { recoveryLink('a'.repeat(64)); } catch (_) { missing.push('HTTPS public URL'); }
+  const enabled = getApp('password_recovery_enabled') !== '0';
+  return { enabled, ready: enabled && missing.length === 0, configured: smtpMissing.length === 0, missing };
+}
+function isConfigured() { return setupStatus().ready; }
 function recoveryLink(token) {
   const origin = (process.env.PUBLIC_URL || SAFE_ORIGIN).replace(/\/$/, '');
   const url = new URL(origin);
@@ -40,8 +65,9 @@ function createSmtpTransport(cfg) {
 }
 
 async function sendRecoveryEmail({ to, token }) {
+  if (!isConfigured()) throw new Error('Password recovery is disabled or its mail settings are incomplete');
   const cfg = senderSettings();
-  if (!cfg) throw new Error('Password reset email is not configured');
+  if (!cfg) throw new Error('SMTP configuration is invalid');
   await assertPublicHost(cfg.host);
   const transport = createSmtpTransport(cfg);
   const link = recoveryLink(token);
@@ -53,7 +79,7 @@ async function sendRecoveryEmail({ to, token }) {
 /** Admin-only delivery test: SMTP accepted the message, not proof of inbox delivery. */
 async function sendTestEmail({ to }) {
   const cfg = senderSettings();
-  if (!cfg) throw new Error('SMTP is not configured. Enter server, username and password in Admin.');
+  if (!cfg) throw new Error('SMTP settings are incomplete or invalid. Check the host, username, password, port, and sender email.');
   if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(to || '')) throw new Error('Invalid admin email');
   await assertPublicHost(cfg.host);
   const transport = createSmtpTransport(cfg);
@@ -66,4 +92,4 @@ async function sendTestEmail({ to }) {
   });
   return { submitted: true };
 }
-module.exports = { RESET_TTL_SECONDS, RESET_COOLDOWN_SECONDS, hashToken, newToken, senderSettings, isConfigured, recoveryLink, sendRecoveryEmail, sendTestEmail };
+module.exports = { RESET_TTL_SECONDS, RESET_COOLDOWN_SECONDS, hashToken, newToken, senderSettings, setupStatus, isConfigured, recoveryLink, sendRecoveryEmail, sendTestEmail, validSmtpHost };

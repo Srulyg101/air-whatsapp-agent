@@ -42,7 +42,7 @@ async function chat(messages, { provider, tools, temperature = 0.6, timeoutMs = 
   const started = Date.now();
   stats.requests++;
   try {
-    if (p.label === 'custom') await assertPublicUrl(p.base);
+    if (p.label === 'custom') await assertPublicUrl(p.base, { requireHttps: true });
     const out = isLocal(p.base) && p.label !== 'custom'
       ? await ollamaChat(p, messages, tools, temperature, timeoutMs)
       : isAnthropic(p.base)
@@ -52,7 +52,7 @@ async function chat(messages, { provider, tools, temperature = 0.6, timeoutMs = 
     return out;
   } catch (err) {
     stats.errors++;
-    stats.lastError = `${new Date().toISOString()} ${err.message}`;
+    stats.lastError = 'AI provider request failed';
     throw err;
   }
 }
@@ -68,7 +68,7 @@ async function ollamaChat(p, messages, tools, temperature, timeoutMs) {
   const body = { model: p.model, messages: msgs, stream: false, keep_alive: '30m', options: { num_ctx: config.numCtx, temperature } };
   if (tools?.length) body.tools = tools;
   const res = await fetch(`${config.ollamaUrl}/api/chat`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs),
+    method: 'POST', redirect: 'manual', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) {
     const t = (await res.text()).slice(0, 300);
@@ -128,7 +128,7 @@ async function anthropicChat(p, messages, tools, temperature, timeoutMs) {
     input_schema: t.function.parameters || { type: 'object', properties: {} },
   }));
   const res = await fetch(`${p.base}/messages`, {
-    method: 'POST',
+    method: 'POST', redirect: 'manual',
     headers: { 'Content-Type': 'application/json', 'x-api-key': p.key || '', 'anthropic-version': '2023-06-01' },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(timeoutMs),
@@ -163,7 +163,7 @@ async function openaiChat(p, messages, tools, temperature, timeoutMs) {
   } else body.max_tokens = tools?.length ? 1100 : 650;
   if (tools?.length) { body.tools = tools; body.tool_choice = 'auto'; }
   const res = await fetch(`${p.base}/chat/completions`, {
-    method: 'POST',
+    method: 'POST', redirect: 'manual',
     headers: { 'Content-Type': 'application/json', ...(p.key ? { Authorization: `Bearer ${p.key}` } : {}) },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(timeoutMs),
@@ -189,7 +189,7 @@ function safeJson(x) {
 
 /** List models for a provider (used by "Test connection"). */
 async function listModels(p) {
-  if (p.label === 'custom') await assertPublicUrl(p.base);
+  if (p.label === 'custom') await assertPublicUrl(p.base, { requireHttps: true });
   if (isLocal(p.base) && p.label !== 'custom') {
     const res = await fetch(`${config.ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(5000) });
     const data = await res.json();
@@ -198,7 +198,7 @@ async function listModels(p) {
   const headers = isAnthropic(p.base)
     ? { 'x-api-key': p.key || '', 'anthropic-version': '2023-06-01' }
     : (p.key ? { Authorization: `Bearer ${p.key}` } : {});
-  const res = await fetch(`${p.base}/models`, { headers, signal: AbortSignal.timeout(10_000) });
+  const res = await fetch(`${p.base}/models`, { redirect: 'manual', headers, signal: AbortSignal.timeout(10_000) });
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data = await res.json();
   return (data.data || data.models || []).map((m) => m.id || m.name).filter(Boolean).slice(0, 300);
