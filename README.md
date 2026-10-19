@@ -150,3 +150,18 @@ mail ports, anti-abuse and IP reputation requirements.
   SMTP acceptance is **not** guaranteed inbox delivery; check the destination.
 - Forgot-password links still last 20 minutes, are single-use, and are
   cryptographically hashed in the database. The SMTP test sends no reset token.
+
+## V2.5 — customer email replies, scheduling requests and website learning
+
+- **Learn website:** Dashboard → Knowledge & prompts → paste the customer's public `https://` website → **Learn website**. Each import is stored in that customer's own private knowledge search. Admin may configure a Firecrawl key under **Admin → Air Smart AI** for JavaScript-heavy pages; alternatively set `FIRECRAWL_API_KEY` on the app server. Without a Firecrawl key, one HTML page is imported with a limited built-in reader. Neither method signs in to private websites.
+- **Booking requests:** Dashboard → Knowledge & prompts → **Your booking or ticket page**. Air Agent can share this link or collect the customer's booking request as a lead and notify the owner. It does **not** actually book an appointment, reserve a seat, issue tickets, charge cards, or validate availability without a real calendar/ticketing integration.
+- **Email:** Dashboard → Bot email → connect IMAP inbox and SMTP sending. Optionally enable **Automatically reply to new customer emails**. It is off by default, ignores common automated/list senders, skips initial backfill, does not execute customer-supplied tool instructions and caps attempts at 30 per account daily. Customers should test sending and receiving first and review email privacy and provider requirements. OAuth sign-in for Gmail/Microsoft is not yet implemented; use an app password where supported.
+- **Affordable AI:** Admin → Air Smart AI → **OpenAI GPT-6 Luna (budget)** fills the provider and model. The server operator still needs a valid OpenAI API key and pays token usage. Customers use this managed model without API configuration. OpenRouter remains available with user sign-in and its *separate* billing.
+- **ChatGPT account sign-in:** OpenAI's new **Sign in with ChatGPT** supports participating apps, but commercial websites require trial approval and OAuth client registration. It is **not** the same as the existing OpenRouter sign-in. Do not promise customer ChatGPT plan usage until approved and integrated. See https://developers.openai.com/siwc/website.
+
+### Rollout verification
+1. Confirm GitHub Actions validation and VPS deploy; do not assume merge proves production success.
+2. Test **Learn website** with a customer-owned public site; verify documents are visible only to that account.
+3. Test **booking link** and booking request from a non-owner WhatsApp chat. Requests should appear as notes; there should be no false confirmation.
+4. Configure a test IMAP + SMTP mailbox, opt in to auto-reply, and verify it replies once to a real new customer email, not to an automated notice. Existing mail should not be answered during initial import.
+5. Check `/health`, live app JavaScript, and Admin → AI model test. Validate API spend limits before inviting paying customers.
