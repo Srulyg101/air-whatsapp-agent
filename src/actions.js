@@ -84,6 +84,16 @@ ${a.body}`; },
     ready: () => true,
     schema: { description: 'Alert the human owner when someone needs a real person, wants to buy, or something is urgent.', parameters: { type: 'object', properties: { message: { type: 'string', description: 'Short summary for the owner' } }, required: ['message'] } },
   },
+  share_booking_link: {
+    perm: 'act_booking', confirm: false,
+    ready: (o) => !!o.booking_url,
+    schema: { description: 'Give a customer the business booking link. This is not a confirmed reservation.', parameters: { type: 'object', properties: {} } },
+  },
+  request_booking: {
+    perm: 'act_booking', confirm: false,
+    ready: () => true,
+    schema: { description: 'Save a customer appointment or event ticket booking request for the business owner. Never claim that a ticket or time is booked unless an actual booking integration confirms it.', parameters: { type: 'object', properties: { name: { type: 'string', description: 'Customer name' }, request: { type: 'string', description: 'Requested service/event, date/time, and other details' }, contact: { type: 'string', description: 'Customer phone/email if provided' } }, required: ['request'] } },
+  },
   trigger_webhook: {
     perm: 'act_webhook', confirm: false,
     ready: (o) => !!o.webhook_url,
@@ -207,6 +217,15 @@ async function run(name, a, ctx, viaConfirm) {
       if (!ctx.ownerJid) return 'Could not reach the owner right now.';
       await ctx.sendRaw(ctx.ownerJid, { text: `📣 *${ctx.contact || 'Someone'}* needs you:\n${String(a.message).slice(0, 2000)}` });
       result = 'The owner has been notified.';
+    } else if (name === 'share_booking_link') {
+      result = 'The business booking page is ' + o.booking_url + '. Ask the customer to complete it; do not say a booking is confirmed.';
+    } else if (name === 'request_booking') {
+      const detail = ['Booking request', a.name && 'Name: ' + String(a.name).slice(0, 120), a.contact && 'Contact: ' + String(a.contact).slice(0, 160), String(a.request).slice(0, 1500)].filter(Boolean).join(' | ');
+      q.addNote.run(ctx.sessionId, ctx.jid || 'email', ctx.contact || a.name || null, detail);
+      if (ctx.ownerJid && ctx.sendRaw) {
+        try { await ctx.sendRaw(ctx.ownerJid, { text: '📅 *New booking request (not confirmed)*\n' + detail }); } catch (_) { /* note remains saved */ }
+      }
+      result = 'Booking request saved for the owner. This is not a confirmed reservation or issued ticket.';
     } else if (name === 'trigger_webhook') {
       await assertPublicUrl(o.webhook_url);
       const payload = JSON.stringify({ event: String(a.event).slice(0, 100), details: String(a.details).slice(0, 8000), contact: ctx.contact || null, chat: ctx.jid, at: new Date().toISOString() });
