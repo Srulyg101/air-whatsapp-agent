@@ -5,11 +5,13 @@ const crypto = require('crypto');
 const config = require('./config');
 
 fs.mkdirSync(config.dataDir, { recursive: true });
+try { fs.chmodSync(config.dataDir, 0o700); } catch (_) {}
 const keyFile = path.join(config.dataDir, 'secret.key');
 
 function loadKey() {
   if (config.appSecret) return crypto.createHash('sha256').update(config.appSecret).digest();
   if (!fs.existsSync(keyFile)) fs.writeFileSync(keyFile, crypto.randomBytes(32).toString('hex'), { mode: 0o600 });
+  try { fs.chmodSync(keyFile, 0o600); } catch (_) {}
   return Buffer.from(fs.readFileSync(keyFile, 'utf8').trim(), 'hex');
 }
 const KEY = loadKey();
@@ -33,6 +35,8 @@ function decrypt(blob) {
   } catch (_) { return ''; }
 }
 
-const mask = (s) => (s ? '••••' + String(s).slice(-4) : '');
+// Never return secret suffixes to the browser. The stable marker only tells the UI
+// that a value exists; save handlers ignore it and preserve the encrypted value.
+const mask = (s) => (s ? '••••••••' : '');
 
 module.exports = { encrypt, decrypt, mask };

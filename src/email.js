@@ -3,14 +3,21 @@
 //  2) Or claim its own address name@<mail domain> (admin sets the domain; mail arrives via /api/inbound/email).
 // New mail is saved, and the owner gets a WhatsApp alert. The AI can read and reply (with confirmation).
 const crypto = require('crypto');
-const { q, getSettings, getSecret, getApp, setApp, getAppSecret, logEvent } = require('./db');
+const { q, getSettings, getSecret, getApp, setApp, getAppSecret, setAppSecret, logEvent } = require('./db');
 const { assertPublicHost } = require('./netguard');
 
 const state = new Map(); // sessionId -> { lastCheck, error, busy }
 
 function inboundSecret() {
-  let s = getApp('inbound_secret');
-  if (!s) { s = crypto.randomBytes(24).toString('hex'); setApp('inbound_secret', s); }
+  let s = getAppSecret('inbound_secret');
+  if (!s) {
+    // Migrate the existing webhook token without changing it, so configured
+    // mail-forwarding integrations keep working while the plaintext is erased.
+    const legacy = getApp('inbound_secret');
+    s = legacy || crypto.randomBytes(32).toString('hex');
+    setAppSecret('inbound_secret', s);
+    if (legacy) setApp('inbound_secret', '');
+  }
   return s;
 }
 
@@ -30,7 +37,7 @@ async function receive(sessionId, mail, wa) {
   });
   if (!info.changes) return null; // already had it
   const id = info.lastInsertRowid;
-  logEvent(sessionId, 'info', null, `📧 Email from ${mail.from_name || mail.from_addr}: ${mail.subject || '(no subject)'}`);
+  logEvent(sessionId, 'info', null, 'Email received');
   const o = getSettings(sessionId).options;
   const s = wa?.get(sessionId);
   if (o.mail_notify && s?.status === 'open' && s.me?.phone) {
@@ -42,7 +49,7 @@ async function receive(sessionId, mail, wa) {
   // Failure is logged, never blocks inbound mail storage or WhatsApp alerts.
   if (wa && o.mail_auto_reply && canSend(sessionId, o)) {
     try { await maybeAutoReply(sessionId, o, mail); }
-    catch (err) { logEvent(sessionId, 'error', null, 'Email auto-reply failed: ' + err.message); }
+    catch (_) { logEvent(sessionId, 'error', null, 'Email auto-reply failed'); }
   }
   return id;
 }
@@ -91,7 +98,7 @@ async function maybeAutoReply(sessionId, o, mail) {
   const body = String(answer.content || '').trim().slice(0, 3000);
   if (!body || answer.toolCalls?.length) return false;
   await send(sessionId, o, { to: mail.from_addr, subject: /^re:/i.test(mail.subject || '') ? mail.subject : 'Re: ' + (mail.subject || '(no subject)'), text: body, inReplyTo: mail.message_id || undefined });
-  logEvent(sessionId, 'action', null, 'Automatic customer email reply sent to ' + mail.from_addr);
+  logEvent(sessionId, 'action', null, 'Automatic customer email reply sent');
   return true;
 }
 

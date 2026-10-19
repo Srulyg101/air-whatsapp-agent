@@ -34,7 +34,7 @@ async function check(onUpdate) {
     console.log(`[autoupdate] new version ${remote.slice(0, 7)} (running ${head.slice(0, 7)}), restarting to update`);
     onUpdate();
   } catch (e) {
-    console.warn('[autoupdate] check failed:', e.message);
+    console.warn('[autoupdate] update check failed');
   }
 }
 

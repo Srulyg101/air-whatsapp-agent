@@ -1,13 +1,22 @@
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const Database = require('better-sqlite3');
 const config = require('./config');
 const { encrypt, decrypt, mask } = require('./secrets');
 
+process.umask(0o077);
 fs.mkdirSync(config.dataDir, { recursive: true });
 const db = new Database(path.join(config.dataDir, 'app.db'));
+// Protect the database plus SQLite's write-ahead-log sidecars. New files are
+// also constrained by the process umask below; chmod covers files from older
+// installs that may have been created before the umask was tightened.
+for (const file of [db.name, `${db.name}-wal`, `${db.name}-shm`]) {
+  try { if (fs.existsSync(file)) fs.chmodSync(file, 0o600); } catch (_) {}
+}
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
+db.pragma('secure_delete = ON');
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
@@ -129,6 +138,21 @@ for (const sql of [
   'ALTER TABLE messages ADD COLUMN kind TEXT DEFAULT \'text\'',
 ]) { try { db.exec(sql); } catch (_) { /* already there */ } }
 
+// Session cookies are bearer credentials. Hash existing rows once in-place so
+// a read-only database leak no longer gives an attacker usable login cookies.
+const authTokenMigration = db.prepare("SELECT value FROM app_settings WHERE key = 'auth_tokens_hashed_v1'").get();
+if (!authTokenMigration) {
+  db.transaction(() => {
+    const rows = db.prepare('SELECT token FROM auth_tokens').all();
+    const update = db.prepare('UPDATE auth_tokens SET token = ? WHERE token = ?');
+    for (const row of rows) {
+      const digest = crypto.createHash('sha256').update(String(row.token)).digest('hex');
+      update.run(digest, row.token);
+    }
+    db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('auth_tokens_hashed_v1', '1')").run();
+  })();
+}
+
 // Old per-chat mutes become "paused until turned back on".
 db.exec(`INSERT OR IGNORE INTO chats (session_id, chat_jid, paused_until) SELECT session_id, chat_jid, -1 FROM muted_chats;
          DELETE FROM muted_chats;`);
@@ -159,7 +183,7 @@ const DEFAULT_OPTIONS = {
   quote_reply: false,
   typing: true,
   reply_delay: 0,            // seconds
-  memory: true,
+  memory: false,
   reply_length: 'short',     // short | medium | long
   language: '',              // empty = same language as the sender
   // ---- hours
@@ -224,7 +248,7 @@ const q = {
   deleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
   insertToken: db.prepare('INSERT INTO auth_tokens (token, user_id) VALUES (?, ?)'),
   userByToken: db.prepare(`SELECT u.id, u.email, u.name, u.is_admin FROM auth_tokens t JOIN users u ON u.id = t.user_id
-                           WHERE t.token = ? AND t.created_at > strftime('%s','now') - 7776000`),
+                           WHERE t.token = ? AND t.created_at > strftime('%s','now') - 2592000`),
   deleteToken: db.prepare('DELETE FROM auth_tokens WHERE token = ?'),
   deleteUserTokens: db.prepare('DELETE FROM auth_tokens WHERE user_id = ?'),
   recentPasswordReset: db.prepare('SELECT created_at FROM password_reset_tokens WHERE user_id = ? AND created_at > ? ORDER BY created_at DESC LIMIT 1'),
@@ -272,6 +296,7 @@ const q = {
   msgTotals: db.prepare("SELECT COUNT(*) total, SUM(ts > strftime('%s','now') - 86400) last24h FROM messages"),
   prune: db.prepare("DELETE FROM messages WHERE ts < strftime('%s','now') - ?"),
   pruneEvents: db.prepare("DELETE FROM events WHERE ts < strftime('%s','now') - ?"),
+  pruneEmails: db.prepare("DELETE FROM emails WHERE created_at < strftime('%s','now') - ?"),
   // events
   addEvent: db.prepare('INSERT INTO events (session_id, type, chat_jid, summary) VALUES (?, ?, ?, ?)'),
   events: db.prepare('SELECT e.*, c.name, c.phone FROM events e LEFT JOIN chats c ON c.session_id = e.session_id AND c.chat_jid = e.chat_jid WHERE e.session_id = ? ORDER BY e.id DESC LIMIT ?'),
@@ -317,6 +342,7 @@ const APP_DEFAULTS = {
   voice_daily_seconds: '3600',
   mail_domain: '',      // e.g. bots.airbiz.ai  -> each bot can claim name@bots.airbiz.ai
   bot_smtp_host: '', bot_smtp_port: '587', bot_smtp_user: '', reset_email_from: '',
+  password_recovery_enabled: '1',
 };
 function getApp(key) { const r = q.getApp.get(key); return r ? r.value : APP_DEFAULTS[key]; }
 function setApp(key, value) { q.setApp.run(key, String(value ?? '')); }
@@ -353,8 +379,8 @@ function cleanOptions(input = {}) {
     else out[k] = String(v ?? '').slice(0, k === 'about' || k === 'rules' ? 8000 : 2000);
     if (ENUMS[k] && !ENUMS[k].includes(out[k])) out[k] = def;
   }
-  if (out.ai_base_url && !/^https?:\/\//i.test(out.ai_base_url)) out.ai_base_url = '';
-  if (out.webhook_url && !/^https?:\/\//i.test(out.webhook_url)) out.webhook_url = '';
+  if (out.ai_base_url && !/^https:\/\//i.test(out.ai_base_url)) out.ai_base_url = '';
+  if (out.webhook_url && !/^https:\/\//i.test(out.webhook_url)) out.webhook_url = '';
   if (out.booking_url && !/^https:\/\/[^\s@/]+\.[^\s@/]+/i.test(out.booking_url)) out.booking_url = '';
   return out;
 }

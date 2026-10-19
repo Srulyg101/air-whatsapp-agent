@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const crypto = require('node:crypto');
+const net = require('node:net');
 
 function loadRecovery(env, configured = true) {
   const module = { exports: {} };
@@ -15,6 +16,7 @@ function loadRecovery(env, configured = true) {
   };
   const requireMock = name => {
     if (name === 'crypto') return crypto;
+    if (name === 'net') return net;
     if (name === 'nodemailer') return { createTransport: params => ({ verify: async () => true, sendMail: async message => deliveries.push({ params, message }) }) };
     if (name === './db') return {
       getApp: k => settings[k] || '',
@@ -88,5 +90,24 @@ test('SMTP test sends to admin only with required TLS submission', async () => {
 });
 test('SMTP test fails closed when no sending account exists', async () => {
   const { recovery } = loadRecovery({}, false);
-  await assert.rejects(() => recovery.sendTestEmail({ to: 'admin@example.com' }), /not configured/);
+  await assert.rejects(() => recovery.sendTestEmail({ to: 'admin@example.com' }), /incomplete or invalid/);
+});
+
+test('Hostinger SMTP status identifies missing fields without returning credential values', () => {
+  const { recovery, settings } = loadRecovery({});
+  settings.bot_smtp_host = 'smtp.hostinger.com';
+  settings.bot_smtp_port = '465';
+  const status = recovery.setupStatus();
+  assert.equal(status.configured, true);
+  assert.equal(status.ready, true);
+  assert.equal(status.enabled, true);
+  assert.equal(JSON.stringify(status).includes('dummy-secret'), false);
+  assert.equal(recovery.senderSettings().host, 'smtp.hostinger.com');
+  assert.equal(recovery.senderSettings().port, 465);
+});
+
+test('invalid SMTP port is not silently replaced with a default', () => {
+  const { recovery, settings } = loadRecovery({});
+  settings.bot_smtp_port = 'banana';
+  assert.equal(recovery.setupStatus().configured, false);
 });

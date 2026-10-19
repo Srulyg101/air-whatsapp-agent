@@ -36,6 +36,7 @@ async function importWebsite(sessionId, raw) {
   if (key) {
     const r = await fetch('https://api.firecrawl.dev/v2/scrape', {
       method: 'POST',
+      redirect: 'manual',
       headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
       body: JSON.stringify({ url, formats: ['markdown'], onlyMainContent: true, timeout: 30000 }),
       signal: AbortSignal.timeout(45000),
