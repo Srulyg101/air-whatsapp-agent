@@ -155,6 +155,11 @@ async function openaiChat(p, messages, tools, temperature, timeoutMs) {
     body.max_completion_tokens = tools?.length ? 1100 : 650;
     if (/^openai\/gpt-oss-(20b|120b)$/.test(p.model)) body.reasoning_effort = 'low';
     if (/^openai\/gpt-oss-(20b|120b)$/.test(p.model)) body.parallel_tool_calls = false;
+  } else if (p.base.replace(/\\/$/, '') === 'https://api.openai.com/v1' && /^gpt-[56]/.test(p.model)) {
+    // Newer OpenAI reasoning/chat models use max_completion_tokens, and may reject temperature.
+    delete body.temperature;
+    body.max_completion_tokens = tools?.length ? 1100 : 650;
+    body.reasoning_effort = 'low';
   } else body.max_tokens = tools?.length ? 1100 : 650;
   if (tools?.length) { body.tools = tools; body.tool_choice = 'auto'; }
   const res = await fetch(`${p.base}/chat/completions`, {
