@@ -1,6 +1,6 @@
 {
   "name": "air-whatsapp-agent",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "description": "Everyone's AI agent on WhatsApp: knowledge base, voice notes, actions (email, calls, reminders). Open-source AI by default.",
   "main": "src/server.js",
   "private": true,
