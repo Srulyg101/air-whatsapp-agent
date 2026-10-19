@@ -596,6 +596,7 @@ PAGES.brain = {
     ${card('Identity & instructions', 'This is the AI\'s main prompt. Plain language works best.', `
       <div class="grid2">${txt('bot_name', 'AI name', S.me.botName, 'What it calls itself.')}<div class="field"><label class="lbl">Tone</label>${seg('tone', [['friendly', 'Friendly'], ['professional', 'Professional'], ['casual', 'Casual'], ['funny', 'Playful'], ['custom', 'Custom']])}<div class="hint">"Custom" = only your instructions below.</div></div></div>
       ${area('about', 'Who is the AI working for?', 'e.g. I\'m Yisroel, CEO of Air Business Solutions (airbiz.ai). We sell electronic shelf labels (AirESL), POS (AirPOS), ERP and payments to retailers in the US. Office hours Sun–Thu 9–6 ET.', 'Business, role, products, location, hours — anything it should always know.', 'tall')}
+      ${txt('booking_url', 'Your booking or ticket page (optional)', 'https://yourbusiness.com/book', 'Customers can open this link. The AI never claims a reservation or payment has happened until verified.')}
       ${area('rules', 'Rules (always / never)', 'Always: offer a demo call for store owners.\nNever: give discounts, promise delivery dates, or share my personal number.\nIf someone is angry or asks for a person: notify me.', 'One rule per line.')}
       <div class="field"><label class="lbl">Extra instructions</label><textarea data-field="persona" placeholder="Anything else: how to greet, sign-offs, things to ask for…">${esc(S.draft.persona)}</textarea></div>`)}
 
@@ -608,6 +609,10 @@ PAGES.brain = {
         </div>`).join('') || '<div class="muted small">No FAQ yet.</div>'}</div>
       <button class="btn ghost sm" style="margin-top:12px" data-act="listAdd" data-list="faq">+ Add question</button>`)}
 
+    ${card('🌐 Learn from your website', 'Paste your company website. The agent reads the page and uses its contents to answer customers.', `
+      <div class="row"><input id="websiteUrl" class="grow" inputmode="url" placeholder="https://yourcompany.com"><button class="btn" data-act="addWebsite" data-busy="Learning…">Learn website</button></div>
+      <p class="hint">For businesses: just paste a link. Admins can enable Firecrawl for JavaScript-heavy websites. Without it, Air Agent reads one public page.</p>
+    `)}
     ${card('Files & notes', 'Upload price lists, catalogs, policies, menus, scripts. The AI looks up the right part for each question.', `
       ${sw('use_knowledge', 'Use my files when answering')}
       <label class="drop" id="drop" for="fileIn" style="display:block;margin-top:10px">
@@ -638,6 +643,13 @@ PAGES.brain = {
     $('#kbQ').addEventListener('keydown', (e) => { if (e.key === 'Enter') PAGES.brain.acts.kbSearch(); });
   },
   acts: {
+    addWebsite: (b) => busy(b, async () => {
+      const url = $('#websiteUrl')?.value?.trim();
+      if (!url) throw new Error('Paste your website address first');
+      const result = await api('/api/kb/website' + tq(), { body: { url } });
+      toast('Website learned with ' + result.via + ' ✓');
+      loadDocs();
+    }),
     addNote: (b) => busy(b, async () => {
       await api('/api/kb/text' + tq(), { body: { title: $('#noteTitle').value || 'Note', text: $('#noteText').value } });
       $('#noteTitle').value = ''; $('#noteText').value = ''; toast('Added to knowledge ✓'); loadDocs();
@@ -773,6 +785,8 @@ PAGES.email = {
       <div class="grid2">${txt('imap_user', 'Email address', 'you@gmail.com')}${secret('imap_pass', 'App password', '')}</div>
       ${sw('mail_check', 'Check this inbox')}
       ${sw('mail_notify', 'WhatsApp me when a new email arrives', 'Sent to your "Message yourself" chat with a short preview.')}
+      ${sw('mail_auto_reply', 'Automatically reply to new customer emails', 'OFF by default. Requires working sending SMTP. Only new mail; max 30 auto replies a day. It does not book or purchase tickets.')}
+      <p class="hint">Auto-replies may contain mistakes. Test with your own email address first. For Gmail or Microsoft 365, OAuth sign-in is a separate integration; this inbox currently uses an app password.</p>
       <div class="row" style="margin-top:10px"><button class="btn ghost sm" data-act="checkMail" data-busy="Checking…">Check now</button>
         <span class="small ${m.error ? '' : 'muted'}" style="${m.error ? 'color:var(--danger)' : ''}">${m.error ? esc(m.error) : m.lastCheck ? 'Last checked ' + ago(m.lastCheck / 1000) : m.imap ? 'Not checked yet' : ''}</span></div>`)}
 
@@ -876,7 +890,7 @@ const PRESETS = [
   ['openrouter', 'OpenRouter (hundreds of models)', 'https://openrouter.ai/api/v1', 'meta-llama/llama-3.3-70b-instruct'],
   ['together', 'Together AI', 'https://api.together.xyz/v1', 'meta-llama/Llama-3.3-70B-Instruct-Turbo'],
   ['deepseek', 'DeepSeek', 'https://api.deepseek.com/v1', 'deepseek-chat'],
-  ['openai', 'OpenAI', 'https://api.openai.com/v1', 'gpt-4o-mini'],
+  ['openai', 'OpenAI', 'https://api.openai.com/v1', 'gpt-6-luna'],
   ['anthropic', 'Anthropic Claude', 'https://api.anthropic.com/v1', 'claude-sonnet-5-5'],
   ['custom', 'Other OpenAI-compatible API', '', ''],
 ];
@@ -898,7 +912,9 @@ async function refreshOpenRouterModels() {
 
 const OR_BASE = 'https://openrouter.ai/api/v1';
 const OR_MODELS = [
-  ['openai/gpt-4o-mini', 'ChatGPT · GPT-4o mini', 'Fast, cheap, great for most chats'],
+  ['openai/gpt-6-luna', 'GPT-6 Luna', 'Low-cost customer support and simple requests'],
+  ['openai/gpt-6-sol', 'GPT-6 Sol', 'Complex bookings and customer cases'],
+  ['openai/gpt-4o-mini', 'GPT-4o mini (older)', 'Legacy option'],
   ['openai/gpt-4o', 'ChatGPT · GPT-4o', 'Smarter answers, costs more'],
   ['anthropic/claude-3.5-haiku', 'Claude Haiku', 'Fast and friendly'],
   ['anthropic/claude-sonnet-4', 'Claude Sonnet', 'Top writing and reasoning'],
@@ -930,7 +946,7 @@ PAGES.model = {
         <div class="signin"><div class="big">✨</div><div class="grow"><h2 style="font-size:18px">Make your assistant much smarter — one click</h2>
           <p class="muted" style="margin:4px 0 0">Sign in with Google or email and choose ChatGPT, Claude, Llama and more. No API keys to copy. Pay only for what you use on your OpenRouter account.</p></div>
           <button class="btn lg" data-act="orSignin" data-busy="Opening…">Sign in & connect</button></div>
-        <p class="small faint" style="margin:12px 0 0">Your assistant can't use a personal ChatGPT or Claude chat subscription — those services don't allow it — so this connects through OpenRouter instead.</p>`)}
+        <p class="small faint" style="margin:12px 0 0">OpenRouter uses its own billing. Official Sign in with ChatGPT plan usage is now available for approved integrations, but commercial websites need OpenAI approval; OpenRouter sign-in is not that integration.</p>`)}
     ${location.protocol === 'http:' && /^\d{1,3}(\.\d{1,3}){3}$/.test(location.hostname) ? `<div class="banner warn"><div class="bi">🔒</div><div>Sign-in needs a secure (HTTPS) address. Open <a href="https://${location.hostname.replace(/\./g, '-')}.sslip.io/#/model"><b>https://${location.hostname.replace(/\./g, '-')}.sslip.io</b></a> (free HTTPS for this server), log in, and sign in from there.</div></div>` : ''}
     <div id="orQr"></div>
 
@@ -1140,6 +1156,11 @@ PAGES.admin = {
       if (box) box.textContent = result.message + ' Sent to ' + result.recipient;
       toast('SMTP accepted your test. Now verify it reached your inbox.');
     }),
+    openaiCheapPreset: () => {
+      $('[data-admin="ai_base_url"]').value = 'https://api.openai.com/v1';
+      $('[data-admin="ai_model"]').value = 'gpt-6-luna';
+      toast('GPT-6 Luna selected. Paste your company OpenAI API key and click Save.');
+    },
     groqPreset: () => {
       $('[data-admin="ai_base_url"]').value = 'https://api.groq.com/openai/v1';
       $('[data-admin="ai_model"]').value = 'openai/gpt-oss-20b';
@@ -1177,13 +1198,17 @@ async function loadAdmin() {
   const pulls = Object.entries(a.pulls || {}).map(([n, p]) => `<div class="small">${esc(n)}: ${esc(p.status)} ${esc(p.detail || '')}</div>`).join('');
   $('#aAi').innerHTML = `
     <div class="small muted" style="margin-bottom:10px">Managed Groq: ${a.groqConfigured ? pill('ok', 'Configured') : pill('bad', 'Add your Groq key')} · Local fallback: ${s.ollama.ok ? pill('ok', 'Ollama running') : pill('bad', 'Ollama down')} ${s.ollama.ok ? `<span class="faint">models: ${esc(s.ollama.models.join(', ') || 'none')}</span>` : ''}</div>
-    <div class="row" style="margin-bottom:10px"><button class="btn ghost sm" data-act="groqPreset">Select Groq GPT-OSS 20B + Whisper</button></div>
+    <div class="row" style="margin-bottom:10px"><button class="btn ghost sm" data-act="groqPreset">Groq GPT-OSS 20B + Whisper</button><button class="btn ghost sm" data-act="openaiCheapPreset">OpenAI GPT-6 Luna (budget)</button></div>
+    <div class="hint">GPT-6 Luna API standard: about $0.10 per million input tokens, $0.50 per million output tokens. Operator API key required; clients don't need one.</div>
     <div class="field"><label class="lbl">API base URL</label><input data-admin="ai_base_url" value="${esc(a.ai_base_url)}" placeholder="Empty = local Ollama on this server"></div>
     <div class="grid2"><div class="field"><label class="lbl">Model</label><input data-admin="ai_model" value="${esc(a.ai_model)}" placeholder="${esc(a.local_default_model)}"></div>
     <div class="field"><label class="lbl">API key (if using an API)</label><input type="password" data-admin="ai_key" value="${esc(a.ai_key)}" autocomplete="new-password"></div></div>
     <div class="grid2"><div class="field"><label class="lbl">AI calls per number per day</label><input type="number" min="1" max="100000" data-admin="ai_daily_limit" value="${esc(a.ai_daily_limit)}"></div>
     <div class="field"><label class="lbl">Voice seconds per number per day</label><input type="number" min="1" max="100000" data-admin="voice_daily_seconds" value="${esc(a.voice_daily_seconds)}"></div></div>
     <div class="hint">Daily budgets protect your usage. 50 GB disk storage is not equivalent to RAM for running a local model.</div>
+    <div class="divider"></div>
+    <div class="field"><label class="lbl">Firecrawl website reader (optional)</label><input type="password" data-admin="firecrawl_key" value="${esc(a.firecrawl_key)}" placeholder="fc-..." autocomplete="new-password"></div>
+    <div class="hint">${a.firecrawlConfigured ? 'Firecrawl is configured ✓' : 'No Firecrawl key yet — basic public HTML webpage import works without a key.'} Set a server-managed key once for all customers.</div>
     <button class="btn sm" data-act="saveAdmin" data-busy="Saving…">Save</button>
     <div class="divider"></div>
     <label class="lbl">Download a local open-source model</label>
