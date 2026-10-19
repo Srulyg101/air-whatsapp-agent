@@ -51,7 +51,7 @@ async function receive(sessionId, mail, wa) {
 function eligibleAutoReply(mail, o) {
   const from = String(mail.from_addr || '').toLowerCase().trim();
   const subject = String(mail.subject || '');
-  if (!o.mail_auto_reply || !/^\\S+@[^\\s@]+\\.[^\\s@]+$/.test(from)) return false;
+  if (!o.mail_auto_reply || !/^\S+@[^\s@]+\.[^\s@]+$/.test(from)) return false;
   if (/^(no.?reply|donotreply|mailer-daemon|postmaster|bounce|notifications?)@/i.test(from)) return false;
   if (/^(auto:|automatic reply|out of office|undeliverable|delivery status|re: out of office)/i.test(subject)) return false;
   if (mail.automated || mail.listMail) return false;
@@ -70,7 +70,7 @@ async function maybeAutoReply(sessionId, o, mail) {
   const ai = require('./ai');
   const kb = require('./knowledge');
   const snippets = o.use_knowledge ? kb.search(sessionId, String(mail.subject || '') + ' ' + String(mail.text).slice(0, 500), 3) : [];
-  const faq = (o.faq || []).slice(0, 15).map((x) => 'Q: ' + x.q + ' A: ' + x.a).join('\\n');
+  const faq = (o.faq || []).slice(0, 15).map((x) => 'Q: ' + x.q + ' A: ' + x.a).join('\n');
   const instructions = [
     'You are a business email receptionist, not a booking engine.',
     'Write a brief, courteous plain-text email reply to the customer. No subject line.',
@@ -82,11 +82,11 @@ async function maybeAutoReply(sessionId, o, mail) {
     'Business rules: ' + String(o.rules || '').slice(0, 1200),
     'Frequently asked: ' + faq.slice(0, 1500),
     'Booking link: ' + (o.booking_url || '(not configured)'),
-    'Relevant published business information: ' + snippets.map((x) => x.text.slice(0, 700)).join('\\n').slice(0, 2000),
-  ].join('\\n');
+    'Relevant published business information: ' + snippets.map((x) => x.text.slice(0, 700)).join('\n').slice(0, 2000),
+  ].join('\n');
   const answer = await ai.chat([
     { role: 'system', content: instructions },
-    { role: 'user', content: 'Customer email subject: ' + String(mail.subject || '').slice(0, 200) + '\\nCustomer email body:\\n' + String(mail.text).slice(0, 2400) },
+    { role: 'user', content: 'Customer email subject: ' + String(mail.subject || '').slice(0, 200) + '\nCustomer email body:\n' + String(mail.text).slice(0, 2400) },
   ], { provider: ai.resolveProvider(getSettings(sessionId)), tools: [], temperature: 0.3, budgetSessionId: sessionId });
   const body = String(answer.content || '').trim().slice(0, 3000);
   if (!body || answer.toolCalls?.length) return false;
