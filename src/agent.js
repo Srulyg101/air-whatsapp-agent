@@ -131,6 +131,8 @@ function buildSystemPrompt(t) {
     L.push(`\nKNOWLEDGE (excerpts from the owner's files that may be relevant):\n` + t.knowledge.slice(0, 3).map((k, i) => `[${i + 1}] ${boundedText(k.text, 1250)}`).join('\n---\n'));
     L.push('Use the knowledge above for facts like prices, hours, products and policies. If the answer is not in it, do not invent it: say you will check, or offer to pass the question to a person.');
   }
+  if (o.booking_url) L.push('For appointment or ticket requests, share this business booking page when useful: ' + o.booking_url + '. The customer must complete the booking there.');
+  L.push('Never say an appointment was reserved, a ticket was issued or paid for, or a booking was completed unless an integrated booking system has returned an actual confirmation. A saved request is not a booking.');
   if (t.tools?.length) {
     L.push(`\nYou can take real actions with the tools provided (${t.tools.map((x) => x.function.name).join(', ')}). Only use a tool when the person clearly asks for that action or it is clearly needed. Never invent email addresses or phone numbers: ask for them.`);
   }
