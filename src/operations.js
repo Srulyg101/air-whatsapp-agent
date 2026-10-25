@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS ops_tickets (
   UNIQUE(session_id, source, source_id)
 );
 CREATE INDEX IF NOT EXISTS ops_tickets_session ON ops_tickets(session_id, id);
-``);
+`);
 
 const now = () => Math.floor(Date.now() / 1000);
 const hash = s => crypto.createHash('sha256').update(s).digest('hex');
