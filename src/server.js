@@ -13,6 +13,7 @@ const kb = require('./knowledge');
 const website = require('./website-import');
 const voice = require('./voice');
 const actions = require('./actions');
+const operations = require('./operations');
 const { think } = require('./agent');
 const wa = require('./wa');
 const { mask } = require('./secrets');
@@ -188,6 +189,9 @@ function sessionFor(req) {
   return wa.get(id);
 }
 const sid = (req) => sessionFor(req).id;
+
+// Operations API uses cookie sessions only for configuration and separately scoped API keys for integrations.
+operations.register(app, auth, sid, wrap);
 
 // ---------- WhatsApp linking ----------
 app.post('/api/wa/connect', auth, wrap(async (req, res) => {
@@ -682,7 +686,8 @@ app.get('/metrics', auth, admin, async (req, res) => {
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) return res.status(400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? `File is larger than ${config.maxUploadMb} MB` : err.message });
-  res.status(500).json({ error: err.message || 'Server error' });
+  const status = Number(err.status) >= 400 && Number(err.status) < 500 ? Number(err.status) : 500;
+  res.status(status).json({ error: status === 500 ? 'Internal server error' : (err.message || 'Bad request') });
 });
 app.get('/{*splat}', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
 
