@@ -102,6 +102,7 @@ function route() {
   if (qs && /signin=failed/.test(qs)) { setTimeout(() => toast('Sign-in did not finish. Try again.', true), 300); history.replaceState(null, '', '#/' + page); }
   if (S.dirty && page !== S.page && !confirm('You have unsaved changes. Leave without saving?')) { location.hash = '#/' + S.page; return; }
   if (S.dirty && page !== S.page) { S.draft = clone({ options: S.settings.options, persona: S.settings.persona, enabled: S.settings.enabled }); S.secretsDraft = {}; S.dirty = false; }
+  if (page !== 'operations') S.opsToken=null;
   S.page = PAGES[page] ? page : 'home';
   if (PAGES[page]?.admin && !S.me.user.is_admin) S.page = 'home';
   renderShell();
@@ -264,7 +265,7 @@ function renderShell() {
   <div class="savebar" id="savebar"><div><b>Unsaved changes</b> <span class="muted small">— your AI keeps using the old settings until you save.</span></div><div class="row"><button class="btn ghost sm" data-act="discard">Discard</button><button class="btn" data-act="save" data-busy="Saving…">Save changes</button></div></div>`;
   $('#targetSel')?.addEventListener('change', async (e) => {
     if (S.dirty && !confirm('Discard unsaved changes?')) { e.target.value = S.target; return; }
-    S.target = e.target.value; try { sessionStorage.setItem('target', S.target); } catch (_) {}
+    S.target = e.target.value; S.ops=null; S.opsToken=null; try { sessionStorage.setItem('target', S.target); } catch (_) {}
     await loadSettings(); renderShell();
   });
   const page = PAGES[S.page];
@@ -726,7 +727,7 @@ PAGES.actions = {
 
     ${actionCard('📝', 'Notes & leads', 'Saves names, orders and requests from your chats.', 'act_note', ['off', 'me', 'anyone'], pill('ok', 'Ready'), '<div id="noteList" style="margin-top:12px"></div>')}
 
-    ${actionCard('🎫', 'Create support tickets', 'Open a real helpdesk ticket only after an explicit owner request and confirmation.', 'act_ticket', ['off', 'me'], ready(true), '<p class="hint">Connect a helpdesk on the <a href="#/operations">Operations API</a> page.</p>')}
+    ${actionCard('🎫', 'Create support tickets', 'Open a real helpdesk ticket only after an explicit owner request and confirmation.', 'act_ticket', ['off', 'me'], pill('warn', 'Requires helpdesk'), '<p class="hint">Connect a helpdesk on the <a href="#/operations">Operations API</a> page.</p>')}
 
     ${actionCard('📣', 'Notify me', 'When someone needs a real person, the AI pings you in "Message yourself".', 'act_notify', ['off', 'anyone'], pill('ok', 'Ready'))}
 
