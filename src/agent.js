@@ -134,7 +134,7 @@ function buildSystemPrompt(t) {
   if (o.booking_url) L.push('For appointment or ticket requests, share this business booking page when useful: ' + o.booking_url + '. The customer must complete the booking there.');
   L.push('Never say an appointment was reserved, a ticket was issued or paid for, or a booking was completed unless an integrated booking system has returned an actual confirmation. A saved request is not a booking.');
   if (t.tools?.length) {
-    L.push(`\nYou can take real actions with the tools provided (${t.tools.map((x) => x.function.name).join(', ')}). Only use a tool when the person clearly asks for that action or it is clearly needed. Never invent email addresses or phone numbers: ask for them.`);
+    L.push(`\nYou can take real actions with the tools provided (${t.tools.map((x) => x.function.name).join(', ')}). Only use a tool when the person clearly asks for that action or it is clearly needed. Never invent email addresses or phone numbers: ask for them. Open helpdesk tickets ONLY on an explicit authorized request and only after human confirmation; never auto-open one based on a received message.`);
   }
   L.push(`\nSTYLE: This is WhatsApp. Use plain text (WhatsApp *bold* is ok), no markdown headers or tables. ${LENGTH[o.reply_length] || LENGTH.short}`);
   if (!o.use_emojis) L.push('Never use emojis.');
@@ -358,7 +358,7 @@ async function handleMessage(m, ctx) {
   let result;
   try {
     result = await think({
-      sessionId, settings, jid, isOwner, isHouse, contact, group, groupName, ownerName: ctx.me?.name, ownerJid,
+      sessionId, settings, jid, messageId: m.key.id, isOwner, isHouse, contact, group, groupName, ownerName: ctx.me?.name, ownerJid,
       text: userLine, history, wasVoice, sock, sendRaw, sender, isCommander, recentContext,
     });
   } catch (err) {
