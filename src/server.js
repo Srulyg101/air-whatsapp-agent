@@ -694,7 +694,7 @@ app.get('/{*splat}', (req, res) => res.sendFile(path.join(__dirname, '..', 'publ
 
 // ---------- housekeeping ----------
 if (config.retentionDays > 0) {
-  const prune = () => { q.prune.run(config.retentionDays * 86400); q.pruneEvents.run(Math.max(30, config.retentionDays) * 86400); q.pruneDaily.run(); q.prunePasswordResets.run(Math.floor(Date.now() / 1000)); };
+  const prune = () => { q.prune.run(config.retentionDays * 86400); q.pruneEvents.run(Math.max(30, config.retentionDays) * 86400); q.pruneDaily.run(); q.prunePasswordResets.run(Math.floor(Date.now() / 1000)); operations.pruneEvents(config.retentionDays); };
   prune();
   setInterval(prune, 6 * 3600_000).unref();
 }
