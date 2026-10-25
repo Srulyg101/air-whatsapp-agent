@@ -63,4 +63,5 @@ This does not silently monitor private employee accounts, create tickets from ev
 - For production use, put the app behind HTTPS, restrict administrator access, and enforce central rate limiting and audit retention if deploying multiple replicas. The current limiter is process-local.
 - Treat all incoming message content as untrusted. Never pass provider credentials through webhook message fields.
 - Do not publish ticket content or customer personal information into public GitHub issues.
+- Raw inbound operations events are pruned on the configured retention interval (default 30 days), while ticket records remain until the account is deleted or a separate ticket-retention policy is implemented. Avoid including unnecessary personal information in tickets.
 - This integration does not yet synchronize provider-side ticket updates or manage full email CC/thread workflows. Add those only with provider-specific identity and permission checks.
