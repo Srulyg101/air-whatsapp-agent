@@ -195,6 +195,7 @@ const DEFAULT_OPTIONS = {
   act_whatsapp: 'me',
   act_reminder: 'me',
   act_webhook: 'off',
+  act_ticket: 'me', // create and read helpdesk tickets: owner/command numbers only
   act_note: 'anyone',
   act_notify: 'anyone',
   act_booking: 'anyone',   // share booking page or save a request for a person
@@ -400,7 +401,7 @@ function logEvent(sessionId, type, chatJid, summary) {
 
 function wipeSession(sessionId) {
   db.transaction(() => {
-    for (const t of ['messages', 'chats', 'events', 'reminders', 'notes', 'kb_docs', 'session_secrets', 'settings', 'emails', 'bot_emails']) {
+    for (const t of ['messages', 'chats', 'events', 'reminders', 'notes', 'kb_docs', 'session_secrets', 'settings', 'emails', 'bot_emails', 'ops_api_keys', 'ops_integrations', 'ops_events', 'ops_tickets']) {
       db.prepare(`DELETE FROM ${t} WHERE session_id = ?`).run(sessionId);
     }
     db.prepare('DELETE FROM kb_chunks WHERE session_id = ?').run(sessionId);
