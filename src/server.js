@@ -44,7 +44,8 @@ const started = Date.now();
 const sessionIdFor = (user) => `u${user.id}`;
 const wrap = (fn) => (req, res, next) => Promise.resolve().then(() => fn(req, res)).catch((e) => {
   if (res.headersSent) return next(e);
-  res.status(e.status || 500).json({ error: e.message || 'Server error' });
+  const status = Number(e.status) >= 400 && Number(e.status) < 500 ? Number(e.status) : 500;
+  res.status(status).json({ error: status === 500 ? 'Internal server error' : (e.message || 'Bad request') });
 });
 const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
 
