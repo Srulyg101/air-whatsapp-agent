@@ -227,6 +227,7 @@ const MORE_NAV = [
   ['actions', '⚡', 'Automations'],
   ['model', '🤖', 'AI model'],
   ['email', '📧', 'Email'],
+  ['operations', '🎫', 'Operations API'],
   ['account', '👤', 'Account'],
   ['admin', '🛡️', 'Admin', true],
 ];
@@ -725,6 +726,8 @@ PAGES.actions = {
 
     ${actionCard('📝', 'Notes & leads', 'Saves names, orders and requests from your chats.', 'act_note', ['off', 'me', 'anyone'], pill('ok', 'Ready'), '<div id="noteList" style="margin-top:12px"></div>')}
 
+    ${actionCard('🎫', 'Create support tickets', 'Open a real helpdesk ticket only after an explicit owner request and confirmation.', 'act_ticket', ['off', 'me'], ready(true), '<p class="hint">Connect a helpdesk on the <a href="#/operations">Operations API</a> page.</p>')}
+
     ${actionCard('📣', 'Notify me', 'When someone needs a real person, the AI pings you in "Message yourself".', 'act_notify', ['off', 'anyone'], pill('ok', 'Ready'))}
 
     ${actionCard('🔗', 'Automations (webhook)', 'Send orders, bookings and leads to Zapier, Make, n8n or your CRM.', 'act_webhook', ['off', 'me', 'anyone'], ready(!!op.webhook_url), `
@@ -761,6 +764,80 @@ async function loadNotes() {
   const el = $('#noteList'); if (!el) return;
   el.innerHTML = r.length ? `<div class="tablewrap"><table><tr><th>Saved</th><th>From</th><th>Note</th><th></th></tr>${r.slice(0, 50).map((x) => `<tr><td class="small">${fmtDate(x.ts)}</td><td class="small">${esc(x.contact || '')}</td><td>${esc(x.text)}</td><td><button class="btn link small" data-act="delNote" data-id="${x.id}">Delete</button></td></tr>`).join('')}</table></div>` : '<div class="small muted">No notes yet.</div>';
 }
+
+// ---------- operations API & ticket integrations ----------
+async function loadOperations() {
+  try {
+    const [keys, integrations, tickets] = await Promise.all([
+      api('/api/operations/keys' + tq()),
+      api('/api/operations/integrations' + tq()),
+      api('/api/operations/tickets' + tq()),
+    ]);
+    S.ops={ keys, integrations, tickets };
+    if (S.page === 'operations') rerender();
+  } catch(e) { toast(e.message,true); }
+}
+PAGES.operations = {
+  render() {
+    const d=S.ops || { keys:[],integrations:[],tickets:[] };
+    const head='<div class="pagehead"><div><h1>Operations API</h1><p>Secure API keys, helpdesk integrations, and ticket records.</p></div></div>';
+    const notice='<div class="banner"><div class="bi">🔐</div><div>Only connect trusted helpdesks. Provider keys are stored encrypted. Ticket creation on WhatsApp requires explicit owner confirmation.</div></div>';
+    const addIntegration=card('Connect a helpdesk','Freshdesk, Zendesk or trusted HTTPS webhook.',
+      '<div class="grid2"><div class="field"><label class="lbl">Connection name</label><input id="opsName" placeholder="Support"></div>'+
+      '<div class="field"><label class="lbl">Provider</label><select id="opsProvider"><option value="freshdesk">Freshdesk</option><option value="zendesk">Zendesk</option><option value="webhook">Webhook</option></select></div></div>'+
+      '<div class="field"><label class="lbl">HTTPS endpoint</label><input id="opsEndpoint" placeholder="https://yourteam.freshdesk.com/"></div>'+
+      '<div class="field"><label class="lbl">Zendesk agent email (if using Zendesk)</label><input id="opsEmail" placeholder="agent@example.com"></div>'+
+      '<div class="field"><label class="lbl">Provider API key / token</label><input id="opsSecret" autocomplete="new-password" type="password" placeholder="Enter securely"></div>'+
+      '<button class="btn" data-act="opsAddIntegration" data-busy="Saving…">Save connection</button>');
+    const linked=card('Connections','No credentials are ever shown on this screen.',
+      '<div class="tablewrap"><table><tr><th>Name</th><th>Provider</th><th>Status</th><th></th></tr>'+
+      (d.integrations.length?d.integrations.map(x=>'<tr><td>'+esc(x.name)+'</td><td>'+esc(x.provider)+'</td><td>'+(x.enabled?'Enabled':'Disabled')+'</td><td>'+(x.enabled?'<button class="btn ghost sm" data-act="opsDisable" data-id="'+x.id+'">Disable</button>':'')+'</td></tr>').join(''):'<tr><td colspan="4">No connections</td></tr>')+
+      '</table></div>');
+    const newKey=card('Create API key','Shown only once. Copy directly into the external system secret store.',
+      '<div class="field"><label class="lbl">Key name</label><input id="opsKeyName" placeholder="Incoming workflow"></div>'+
+      '<div class="row" style="flex-wrap:wrap;gap:16px;margin:12px 0"><label><input id="opsEvents" type="checkbox" checked> Receive events</label>'+
+      '<label><input id="opsWrite" type="checkbox"> Create tickets</label><label><input id="opsRead" type="checkbox"> Read tickets</label></div>'+
+      '<div class="field"><label class="lbl">Valid days (1–90)</label><input id="opsExpiry" type="number" min="1" max="90" value="30" style="max-width:120px"></div>'+
+      '<button class="btn" data-act="opsNewKey" data-busy="Creating…">Generate key</button>'+
+      (S.opsToken?'<div class="field" style="margin-top:14px"><label class="lbl">Copy now (this is the only display)</label><textarea id="opsToken" rows="2" readonly>'+esc(S.opsToken)+'</textarea><button class="btn ghost sm" data-act="opsCopyKey">Copy key</button></div>':''));
+    const keys=card('Keys','Revoke unused credentials.',
+      '<div class="tablewrap"><table><tr><th>Name</th><th>Permissions</th><th>Expiry</th><th></th></tr>'+
+      (d.keys.length?d.keys.map(x=>'<tr><td>'+esc(x.name)+'</td><td class="small">'+esc(x.scopes.join(', '))+'</td><td>'+fmtDate(x.expires_at)+'</td><td>'+(x.revoked_at?'Revoked':'<button class="btn ghost sm" data-act="opsRevoke" data-id="'+x.id+'">Revoke</button>')+'</td></tr>').join(''):'<tr><td colspan="4">No API keys</td></tr>')+
+      '</table></div>');
+    const tickets=card('Tickets','draft = local only. needs_review = outbound result uncertain.',
+      '<button class="btn ghost sm" data-act="opsRefresh">Refresh</button><div class="tablewrap"><table><tr><th>#</th><th>Subject</th><th>Status</th><th>External</th></tr>'+
+      (d.tickets.length?d.tickets.map(x=>'<tr><td>'+x.id+'</td><td>'+esc(x.title)+'</td><td>'+esc(x.status)+'</td><td>'+esc(x.external_id||'—')+'</td></tr>').join(''):'<tr><td colspan="4">No tickets</td></tr>')+
+      '</table></div>');
+    return head+notice+addIntegration+linked+newKey+keys+tickets+
+      '<p class="small muted">API documentation: docs/operations-api.md in your repository.</p>';
+  },
+  after(){ if(!S.ops) loadOperations(); },
+  acts:{
+    opsRefresh:()=>loadOperations(),
+    opsAddIntegration:b=>busy(b,async()=>{
+      const body={name:$('#opsName').value.trim(),provider:$('#opsProvider').value,endpoint:$('#opsEndpoint').value.trim(),email:$('#opsEmail').value.trim(),api_key:$('#opsSecret').value};
+      await api('/api/operations/integrations'+tq(),{body});
+      $('#opsSecret').value='';toast('Connection saved; test with a non-sensitive ticket.');await loadOperations();
+    }),
+    opsDisable:b=>busy(b,async()=>{
+      if(!confirm('Disable this integration and destroy its stored credential?')) return;
+      await api('/api/operations/integrations/'+b.dataset.id+tq(),{method:'DELETE'});
+      await loadOperations();
+    }),
+    opsNewKey:b=>busy(b,async()=>{
+      const scopes=[['opsEvents','events:write'],['opsWrite','tickets:write'],['opsRead','tickets:read']].filter(x=>$('#'+x[0]).checked).map(x=>x[1]);
+      const body={name:$('#opsKeyName').value.trim(),scopes,expires_in_days:Number($('#opsExpiry').value)};
+      const r=await api('/api/operations/keys'+tq(),{body});
+      S.opsToken=r.token;await loadOperations();toast('Copy your key now. It will not be shown again.');
+    }),
+    opsCopyKey:()=>{const v=$('#opsToken')?.value;if(v)navigator.clipboard.writeText(v).then(()=>toast('Key copied')).catch(()=>toast('Select and copy the key manually',true));},
+    opsRevoke:b=>busy(b,async()=>{
+      if(!confirm('Immediately revoke this key?'))return;
+      await api('/api/operations/keys/'+b.dataset.id+tq(),{method:'DELETE'});
+      S.opsToken=null;await loadOperations();
+    }),
+  },
+};
 
 // ---------- BOT EMAIL ----------
 PAGES.email = {
