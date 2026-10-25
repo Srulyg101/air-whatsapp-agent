@@ -124,6 +124,8 @@ function toolsFor(ctx) {
   const out = [];
   for (const [name, d] of Object.entries(DEFS)) {
     const perm = o[d.perm];
+    // Operations tickets can never be exposed to arbitrary WhatsApp senders.
+    if ((name === 'create_ticket' || name === 'get_ticket' || name === 'list_tickets') && !ctx.isOwner) continue;
     if (perm === 'off' || !perm) continue;
     if (perm === 'me' && !ctx.isOwner) continue;
     if (name === 'notify_owner' && ctx.isOwner) continue; // owner doesn't need to notify themselves
@@ -158,6 +160,7 @@ async function handleConfirmation(ctx, text) {
 async function execute(name, args, ctx) {
   const d = DEFS[name];
   if (!d) return `Unknown action ${name}`;
+  if ((name === 'create_ticket' || name === 'get_ticket' || name === 'list_tickets') && !ctx.isOwner) return 'This ticket action is restricted to the account owner.';
   const o = ctx.settings.options;
   const perm = o[d.perm];
   if (!perm || perm === 'off' || (perm === 'me' && !ctx.isOwner)) return 'This action is not allowed here.';
