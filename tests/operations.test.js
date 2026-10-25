@@ -42,6 +42,7 @@ test('operations key scope, inbound events, ticket idempotency, outbound and rev
  const readKey=await request('POST','/api/operations/keys',{name:'events',scopes:['events:write'],expires_in_days:5},cookie);
  assert.equal(readKey.status,201);
  assert.match(readKey.data.token,/^air_live_/);
+ assert.equal(db.prepare('SELECT token_hash FROM ops_api_keys WHERE id=?').get(readKey.data.id).token_hash.includes(readKey.data.token),false);
  const evHeaders={Authorization:'Bearer '+readKey.data.token};
  const event=await request('POST','/api/v1/events',{source:'whatsapp',source_id:'m-1',type:'message',message:'Please check scanner'},evHeaders);
  assert.equal(event.status,202);assert.ok(event.data.id);
@@ -70,6 +71,15 @@ test('operations key scope, inbound events, ticket idempotency, outbound and rev
  assert.equal(get.data.title,'Scanner broken');
  const eventsTicket=await request('POST','/api/v1/events',{source:'whatsapp',source_id:'m-3',message:'Broken printer',open_ticket:true,title:'Printer repair'},h);
  assert.equal(eventsTicket.status,202);assert.equal(eventsTicket.data.ticket.status,'sent');
+ const operations=require('../src/operations');
+ const otherKey=operations.createKey('u999',{name:'isolated-tenant',scopes:['tickets:read']});
+ const isolated=await request('GET','/api/v1/tickets',null,{Authorization:'Bearer '+otherKey.token});
+ assert.equal(isolated.status,200);
+ assert.equal(isolated.data.length,0);
+ const actions=require('../src/actions');
+ const outsider={isOwner:false,sessionId:'u1',settings:{options:{act_ticket:'anyone'}}};
+ assert.equal(actions.toolsFor(outsider).some(x=>x.function.name==='create_ticket'),false);
+ assert.match(await actions.execute('create_ticket',{title:'No',description:'No'},outsider),/restricted/);
  const revoked=await request('DELETE','/api/operations/keys/'+writeKey.data.id,null,cookie);
  assert.equal(revoked.status,200);
  const after=await request('GET','/api/v1/tickets',null,h);
