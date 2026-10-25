@@ -3,7 +3,7 @@ const path = require('path');
 const env = (k, d) => (process.env[k] !== undefined && process.env[k] !== '' ? process.env[k] : d);
 
 module.exports = {
-  version: '2.5.0',
+  version: '2.6.0',
   port: Number(env('PORT', 3000)),
   dataDir: path.resolve(env('DATA_DIR', path.join(__dirname, '..', 'data'))),
   botName: env('BOT_NAME', 'Air Agent'),
