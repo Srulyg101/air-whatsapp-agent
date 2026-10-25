@@ -255,4 +255,5 @@ function register(app,auth,sid,wrap) {
   }));
   app.use('/api/v1',v1);
 }
-module.exports={register,createTicket,hasIntegration,getTicket,listTickets,createKey,parseConfig};
+function pruneEvents(days=30) { db.prepare('DELETE FROM ops_events WHERE created_at < ?').run(now()-Math.max(1,Number(days)||30)*86400); }
+module.exports={register,createTicket,hasIntegration,getTicket,listTickets,createKey,parseConfig,pruneEvents};
